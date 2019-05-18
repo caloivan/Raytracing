@@ -1,20 +1,19 @@
+int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
 //////////////////////////////////////////////////////////////////////
 // Provides the framework for a raytracer.
 ////////////////////////////////////////////////////////////////////////
 #include <vector>
-#include <chrono>// measure time
-
 #include <windows.h>
 #include <cstdlib>
 #include <limits>
 #include <crtdbg.h>
 #include "geom.h"
 #include "raytrace.h"
-
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 #include <random>
+#include <chrono>// measure time
 std::mt19937_64 RNGen;// A good quality *thread-safe* Mersenne Twister random number generator.
 std::uniform_real_distribution<> myrandom(0.0, 1.0f);
 // Call myrandom(RNGen) to get a uniformly distributed random number in [0,1].
@@ -213,7 +212,7 @@ void Scene::TraceImage(Color* image, const int pass)
 				if (shapes[i]->Intersect(r, intersection)) {
 					if (intersection.t < minTime) {// compare 
 						minTime = intersection.t;
-						image[y * width + x] = ReturnColor(intersection, 4);
+						image[y * width + x] = ReturnColor(intersection, optionDraw);
 					}
 				}
 			}
