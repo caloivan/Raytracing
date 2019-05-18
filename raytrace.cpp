@@ -1,39 +1,27 @@
 //////////////////////////////////////////////////////////////////////
 // Provides the framework for a raytracer.
 ////////////////////////////////////////////////////////////////////////
-
 #include <vector>
 #include <chrono>// measure time
-#ifdef _WIN32
-    // Includes for Windows
-    #include <windows.h>
-    #include <cstdlib>
-    #include <limits>
-    #include <crtdbg.h>
-#else
-    // Includes for Linux
-#endif
 
+#include <windows.h>
+#include <cstdlib>
+#include <limits>
+#include <crtdbg.h>
 #include "geom.h"
 #include "raytrace.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-// A good quality *thread-safe* Mersenne Twister random number generator.
 #include <random>
-std::mt19937_64 RNGen;
+std::mt19937_64 RNGen;// A good quality *thread-safe* Mersenne Twister random number generator.
 std::uniform_real_distribution<> myrandom(0.0, 1.0f);
 // Call myrandom(RNGen) to get a uniformly distributed random number in [0,1].
 
+Scene::Scene() { }
 
-Scene::Scene() 
-{ 
-}
-
-void Scene::Finit()
-{
-}
+void Scene::Finit(){}
 
 void Scene::triangleMesh(MeshData* mesh)
 {
@@ -145,7 +133,6 @@ void Scene::Command(const std::vector<std::string>& strings,
     else if (c == "sphere") {
         // syntax: sphere x y z   r
         // Creates a Shape instance for a sphere defined by a center and radius
-        //realtime->sphere(Vector3f(f[1], f[2], f[3]), f[4], currentMat);
 		Shape* mySPhere = new Sphere(Vector3f(f[1], f[2], f[3]),    f[4],    currentMat);
 		shapes.push_back(mySPhere);
 		if (currentMat->isLight()) {
@@ -233,5 +220,4 @@ void Scene::TraceImage(Color* image, const int pass)
         }
     }
 	printf("\n In %i ms,  %i Shapes \n DONE!!!!", (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count(), shapes.size());
-
 }

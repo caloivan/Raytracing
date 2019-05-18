@@ -1,10 +1,8 @@
 ﻿///////////////////////////////////////////////////////////////////////
 // A framework for a raytracer.
 ////////////////////////////////////////////////////////////////////////
-
 class Shape;
 class Intersection;
-
 const float PI = 3.14159265358979323846f;
 const float Radians = PI / 180.0f;
 const float epsilon = 0.000001f; //min distance offset for interseptions
@@ -57,9 +55,6 @@ struct MeshData
     Material *mat;
 };
 
-////////////////////////////////////////////////////////////////////////
-// Light: encapsulates a light and communiction with a shader.
-////////////////////////////////////////////////////////////////////////
 class Light: public Material
 {
 public:
@@ -69,8 +64,6 @@ public:
     //virtual void apply(const unsigned int program);
 };
 
-////////////////////////////////////////////////////////////////////////////////
-// Scene
 class Realtime;
 class Camera;
 
@@ -172,7 +165,6 @@ public:
 	float  t1;// t max of interception
 public:
 	Interval() : t0(0), t1(INFINITY) {}
-
 	void Intersect(Ray _ray, const Slab& slab)// : forms interval by intersecting ray with slab, and intersects with this*
 	{
 		float nDotD = slab.normal.dot(_ray.D);
@@ -405,7 +397,7 @@ public:
 	virtual bool Intersect(Ray  _ray, Intersection& _inter) {
 		Vector3f E1 = v1 - v0;
 		Vector3f E2 = v2 - v0;
-		Vector3f normal = E1.cross(E2).normalized();// SLIDES SAYS E2 X E1
+		Vector3f normal = E2.cross(E1).normalized();// SLIDES SAYS E2 X E1
 		Vector3f p = _ray.D.cross(E2);
 		float d = p.dot(E1);
 		if (d == 0.0f) return false;// paralel to triangle
