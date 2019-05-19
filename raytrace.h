@@ -397,7 +397,7 @@ public:
 	virtual bool Intersect(Ray  _ray, Intersection& _inter) {
 		Vector3f E1 = v1 - v0;
 		Vector3f E2 = v2 - v0;
-		Vector3f normal = E2.cross(E1).normalized();// SLIDES SAYS E2 X E1
+		Vector3f normal = E1.cross(E2).normalized();// SLIDES SAYS E2 X E1
 		Vector3f p = _ray.D.cross(E2);
 		float d = p.dot(E1);
 		if (d == 0.0f) return false;// paralel to triangle

@@ -1,4 +1,5 @@
 int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
+int kdtree = 1;
 //////////////////////////////////////////////////////////////////////
 // Provides the framework for a raytracer.
 ////////////////////////////////////////////////////////////////////////
@@ -15,9 +16,71 @@ int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
 #include <random>
 #include <chrono>// measure time
 std::mt19937_64 RNGen;// A good quality *thread-safe* Mersenne Twister random number generator.
-std::uniform_real_distribution<> myrandom(0.0, 1.0f);
+std::uniform_real_distribution<> myrandom(0 , 1.0f);
 // Call myrandom(RNGen) to get a uniformly distributed random number in [0,1].
 
+///************************** KDTREE SECTION ***************************************///
+//These includes are  written on geom.h
+//#include <Eigen/StdVector> // For vectors, matrices (2d,3d,4d) and quaternions in f and d precision.
+//#include <Eigen_unsupported/Eigen/BVH> // For KdBVH
+//typedef AlignedBox<float,3> Bbox;
+class BoxVolume : public Shape {
+public:
+	Vector3f base;// base;
+	Vector3f diagonal;// diagonal;
+public:
+	BoxVolume(Vector3f _b0, Vector3f _b1) :base(_b0), diagonal(_b1) {}
+	virtual bool Intersect(Ray _ray, Intersection & _inter) {
+		Slab slabX(-base[0], -base[0] - diagonal[0], Vector3f(1, 0, 0));
+		Slab slabY(-base[1], -base[1] - diagonal[1], Vector3f(0, 1, 0));
+		Slab slabZ(-base[2], -base[2] - diagonal[2], Vector3f(0, 0, 1));
+
+		Interval intervalX, intervalY, intervalZ;
+		intervalX.Intersect(_ray, slabX);
+		intervalY.Intersect(_ray, slabY);
+		intervalZ.Intersect(_ray, slabZ);
+
+		float tMi = fmax(intervalX.t0, fmax(intervalY.t0, intervalZ.t0));
+		float tMa = fmin(intervalX.t1, fmin(intervalY.t1, intervalZ.t1));
+
+		if (tMi > tMa || tMa <= epsilon) return false;// invalid behavior  //both behind ray
+
+		tMi = tMi > epsilon ? tMi : 0; //minimum interception in front of camera, if ray starts inside box, return 0
+		_inter.SetIntersection(tMi, this, _ray.eval(tMi), Vector3f(0, 0, 0));// normal doesnt matters, cause here is a rough intersection
+
+		return true;
+	}
+	Bbox  returnBbox() { return boundingBox; }
+	virtual float get_area() { return 0.0f; };
+};
+
+class Minimizer
+{
+public:
+	typedef float Scalar; // KdBVH needs Minimizer::Scalar defined
+	Ray ray;
+	Intersection minIntersection;
+public:
+	Minimizer(const Ray& r) : ray(r) { }
+
+	float minimumOnObject(Shape* obj) {
+		Intersection  intersection;
+		if (obj->Intersect(ray, intersection)) {
+			minIntersection = intersection.t < minIntersection.t ? intersection : minIntersection;
+			return intersection.t;
+		}
+		return INFINITY;
+	}
+
+	float minimumOnVolume(const Bbox& box) {
+		BoxVolume volume((box.min)(), (box.max)() - (box.min)());
+		Intersection i;
+		return volume.Intersect(ray, i) ? i.t : INFINITY;//if volume intersects ray, return time , else return infinity
+	}
+};
+
+Bbox bounding_box(Shape* shape) { return shape->returnBbox(); }
+///************************** END SECTION ***************************************///
 Scene::Scene() { }
 
 void Scene::Finit(){}
@@ -37,7 +100,7 @@ void Scene::triangleMesh(MeshData* mesh)
 		shapes.push_back(pTri);
 	}
 }
-Quaternionf Orientation(int i, 
+Quaternionf Orientation(unsigned int i, 
                         const std::vector<std::string>& strings,
                         const std::vector<float>& f)
 {
@@ -199,23 +262,33 @@ void Scene::TraceImage(Color* image, const int pass)
 	 Vector3f const Y =         camera_->ry_ * camera_->orientation_._transformVector(Vector3f::UnitY());
 	 Vector3f const Z = -1.0f *                camera_->orientation_._transformVector(Vector3f::UnitZ());
 
+	 KdBVH<float, 3, Shape*> Tree(shapes.begin(), shapes.end());
 	 auto start = std::chrono::steady_clock::now();
 #pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
     for (int y=0;  y<height;  y++) {
-        for (int x=0;  x<width;  x++) {
+		for (int x = 0; x < width; x++) {
 			float dx = 2.0f * ((x/* + (float)(myrandom(RNGen))*/) / (float)width) - 1.0f;
 			float dy = 2.0f * ((y/* + (float)(myrandom(RNGen))*/) / (float)height) - 1.0f;
 			Ray r(camera_->eye_, dx * X + dy * Y + Z);
-			float minTime = INFINITY;
-			for (unsigned int i = 0; i < shapes.size(); ++i) {
-				Intersection intersection;
-				if (shapes[i]->Intersect(r, intersection)) {
-					if (intersection.t < minTime) {// compare 
-						minTime = intersection.t;
-						image[y * width + x] = ReturnColor(intersection, optionDraw);
-					}
-				}
+
+			if (kdtree ) {
+				Minimizer minimizer(r);
+				BVMinimize(Tree, minimizer);
+				if (minimizer.minIntersection.t != INFINITY)
+					image[y * width + x] = ReturnColor(minimizer.minIntersection, optionDraw);
 			}
+			else {
+				float minTime = INFINITY;
+				for (unsigned int i = 0; i < shapes.size(); ++i) {
+					Intersection intersection;
+					if (shapes[i]->Intersect(r, intersection)) {
+						if (intersection.t < minTime) {// compare 
+							minTime = intersection.t;
+							image[y * width + x] = ReturnColor(intersection, optionDraw);
+						}
+					}
+			}
+		}
         }
     }
 	printf("\n In %i ms,  %i Shapes \n DONE!!!!", (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count(), shapes.size());

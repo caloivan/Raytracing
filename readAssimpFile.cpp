@@ -103,7 +103,7 @@ void recurseModelNodes(Scene* scene,
         for (unsigned int t=0;  t<aimesh->mNumFaces;  ++t) {
             aiFace* aiface = &aimesh->mFaces[t];
             //printf("%d: %d %d\n", t, aiface->mNumIndices, aimesh->mNumFaces);
-            for (int i=2;  i<aiface->mNumIndices;  i++) {
+            for (unsigned int i=2;  i<aiface->mNumIndices;  i++) {
                 meshdata->triangles.push_back(TriData(aiface->mIndices[0],
                                                       aiface->mIndices[1],
                                                       aiface->mIndices[2])); } }
