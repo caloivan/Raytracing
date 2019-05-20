@@ -1,5 +1,15 @@
 int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
 int kdtree = 1;
+int numberOfPasses = 50;  // if passes = 1 then raytracing, else path tracing
+#define EXPLICIT_
+
+typedef enum {
+	E_DIFFUSE,
+	E_REFLECTION,
+	E_TRANSMISSION,
+	E_ALL
+}ChoiceType;
+
 //////////////////////////////////////////////////////////////////////
 // Provides the framework for a raytracer.
 ////////////////////////////////////////////////////////////////////////
@@ -18,7 +28,6 @@ int kdtree = 1;
 std::mt19937_64 RNGen;// A good quality *thread-safe* Mersenne Twister random number generator.
 std::uniform_real_distribution<> myrandom(0 , 1.0f);
 // Call myrandom(RNGen) to get a uniformly distributed random number in [0,1].
-
 ///************************** KDTREE SECTION ***************************************///
 //These includes are  written on geom.h
 //#include <Eigen/StdVector> // For vectors, matrices (2d,3d,4d) and quaternions in f and d precision.
@@ -62,7 +71,6 @@ public:
 	Intersection minIntersection;
 public:
 	Minimizer(const Ray& r) : ray(r) { }
-
 	float minimumOnObject(Shape* obj) {
 		Intersection  intersection;
 		if (obj->Intersect(ray, intersection)) {
@@ -71,7 +79,6 @@ public:
 		}
 		return INFINITY;
 	}
-
 	float minimumOnVolume(const Bbox& box) {
 		BoxVolume volume((box.min)(), (box.max)() - (box.min)());
 		Intersection i;
@@ -81,8 +88,116 @@ public:
 
 Bbox bounding_box(Shape* shape) { return shape->returnBbox(); }
 ///************************** END SECTION ***************************************///
-Scene::Scene() { }
 
+class Tracer
+{
+	Color C;
+	Color W;
+	//Choose a uniformly distributed point on a sphere with center C and radius R
+	void  SampleSphere(Sphere* sphere,Intersection &result) {
+		const float z = 2 * myrandom(RNGen) - 1.0f;
+		const float r = sqrtf(1 - z * z);
+		const float a = 2 * PI * myrandom(RNGen);
+		result.n = Vector3f(r * cos(a), r * sin(a), z);
+		result.p = sphere->center_ + result.n * sphere->radius;
+	};
+	Intersection  SampleLight(std::vector<Shape*>& lights) {
+		Intersection result;
+		Sphere* sph = (Sphere*)lights[0];
+		result.s = sph;
+		SampleSphere(sph, result );//fills  Normal and Point of intersection
+		return result;
+	};
+	Vector3f SampleBrdf(Vector3f& normal ) {
+		return SampleLobe(normal, sqrtf(myrandom(RNGen)), 2 * PI * (myrandom(RNGen))).normalized();
+	}
+	//Vector3f  SampleBrdf(const ChoiceType& choice, Vector3f& normal, Vector3f& wo, Shape*);
+	Vector3f  SampleLobe(Vector3f normal, float r1, float r2) {
+		float s = sqrtf(1 - (r1 * r1));
+		Vector3f k = Vector3f(s * cosf(r2), s * sinf(r2), r1);
+		Quaternionf q = Quaternionf::FromTwoVectors(Vector3f::UnitZ(), normal);
+		return q._transformVector(k);
+	};
+	//Convert between angular measure and area measure
+	float GeometryFactor(Intersection& A, Intersection& B) {
+		Vector3f D = A.p - B.p;
+		return fabsf(A.n.dot(D)*B.n.dot(D)/powf(D.dot(D),2));
+	};
+
+	float PdfLight(Intersection& result) {
+		return 1.0f / result.s->get_area();
+	};
+
+	float PdfBrdf(Vector3f& normal, Vector3f& wi) {
+		return fabsf(normal.dot(wi)) / PI;
+	};
+	float PhongD(Vector3f& normal, Vector3f& m, float& alpha);
+	float PhongG(Vector3f& wo, Vector3f& wi, Vector3f& m, Vector3f& N, float& alpha);
+	float PhondG1(Vector3f& v, Vector3f& m, Vector3f& N, float& alpha);
+	Color EvalScattering(Vector3f& normal, Vector3f& wi, Shape * shape) {
+		return fabsf(normal.dot(wi)) * shape->material->Kd/ PI;
+	};
+
+	Color EvalScattering(const ChoiceType& choice, Vector3f& normal, Vector3f& wi, Vector3f& wo, Shape*, float& t);
+	Color EvalBrdf(const ChoiceType& choice, Vector3f& normal, Vector3f& wi, Vector3f& wo, Shape*, float& t);
+	Color Fresnel(const float& d, Shape* shp);
+
+public:
+	Tracer() {};
+	~Tracer() {};
+	Intersection FindIntersection(Ray& ray, KdBVH<float, 3, Shape*>& tree ) {
+		Intersection p;
+		Minimizer minimizer(ray);
+		BVMinimize(tree, minimizer);
+		return minimizer.minIntersection;
+	};
+
+	Color TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Shape*>& tree_, float deltaTime) {
+		C = Color(0.0f, 0.0f, 0.0f); 
+		W = Color(0.0f, 0.0f, 0.0f);
+		Intersection P = FindIntersection(ray,tree_);
+		if (!P.s) return C;// no intersection
+		if (P.s->isLight)  return P.s->material->Kd;// is light KD
+
+		Vector3f wi, wo = -ray.D;
+		while (myrandom(RNGen) <= RUSSIAN_ROULETTE) {
+			Vector3f normal = P.n;
+			float p;
+#ifdef EXPLICIT	// Explicit light connection
+			Intersection L = SampleLight(lights);// Shadow Light
+			p = PdfLight(L) / GeometryFactor(P, L);//Probability for that event to happen
+			wo = ray.D;
+			wi = L.p - P.p;
+			P.p = P.p + wo * 0.0001f;
+			Ray  I(P.p, wi);//Shadow Ray
+			Intersection inters = FindIntersection(I, tree_);
+			if (p > 0 && inters.s && inters.p == P.p) {
+				Color f = EvalScattering(normal, wi, P.s);
+				C += W * f / p * (Color)P.s->material->Kd;
+			}
+#endif
+		//Extend Path
+			wi = SampleBrdf(normal);// Choose a sample direction from P
+			P.p = P.p + wi * 0.0001f;
+			Ray ExtendPath(P.p, wi);
+			Intersection Q = FindIntersection(ExtendPath, tree_);
+			if (!Q.s) break;
+			Color f = EvalScattering(normal, wi, Q.s);
+			p = PdfBrdf(normal, wi) * RUSSIAN_ROULETTE;
+			if (p < epsilon) break;
+			W *= f / p;
+		//Implicit Light Connection
+			if (Q.s->material->isLight()) {
+				C += W * (Color)Q.s->material->Kd;
+				break;
+			}
+			P.SetIntersection(Q); //Prepare next possible ray rebound
+		}
+		return C;
+	};
+};
+
+Scene::Scene() { }
 void Scene::Finit(){}
 
 void Scene::triangleMesh(MeshData* mesh)
@@ -100,9 +215,7 @@ void Scene::triangleMesh(MeshData* mesh)
 		shapes.push_back(pTri);
 	}
 }
-Quaternionf Orientation(unsigned int i, 
-                        const std::vector<std::string>& strings,
-                        const std::vector<float>& f)
+Quaternionf Orientation(unsigned int i,  const std::vector<std::string>& strings, const std::vector<float>& f)
 {
     Quaternionf q(1,0,0,0); // Unit quaternion
     while (i<strings.size()) {
@@ -122,8 +235,6 @@ Quaternionf Orientation(unsigned int i,
     return q;
 }
 
-////////////////////////////////////////////////////////////////////////
-// Material: encapsulates surface properties
 void Material::setTexture(const std::string path)
 {
     //int width, height, n;
@@ -145,8 +256,7 @@ void Material::setTexture(const std::string path)
     //stbi_image_free(image);
 }
 
-void Scene::Command(const std::vector<std::string>& strings,
-                    const std::vector<float>& f)
+void Scene::Command(const std::vector<std::string>& strings, const std::vector<float>& f)
 {
     if (strings.size() == 0) return;
     std::string c = strings[0];
@@ -263,33 +373,45 @@ void Scene::TraceImage(Color* image, const int pass)
 	 Vector3f const Z = -1.0f *                camera_->orientation_._transformVector(Vector3f::UnitZ());
 
 	 KdBVH<float, 3, Shape*> Tree(shapes.begin(), shapes.end());
-	 auto start = std::chrono::steady_clock::now();
-#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
-    for (int y=0;  y<height;  y++) {
-		for (int x = 0; x < width; x++) {
-			float dx = 2.0f * ((x/* + (float)(myrandom(RNGen))*/) / (float)width) - 1.0f;
-			float dy = 2.0f * ((y/* + (float)(myrandom(RNGen))*/) / (float)height) - 1.0f;
-			Ray r(camera_->eye_, dx * X + dy * Y + Z);
-
-			if (kdtree ) {
-				Minimizer minimizer(r);
-				BVMinimize(Tree, minimizer);
-				if (minimizer.minIntersection.t != INFINITY)
-					image[y * width + x] = ReturnColor(minimizer.minIntersection, optionDraw);
-			}
-			else {
-				float minTime = INFINITY;
-				for (unsigned int i = 0; i < shapes.size(); ++i) {
-					Intersection intersection;
-					if (shapes[i]->Intersect(r, intersection)) {
-						if (intersection.t < minTime) {// compare 
-							minTime = intersection.t;
-							image[y * width + x] = ReturnColor(intersection, optionDraw);
-						}
-					}
-			}
-		}
-        }
-    }
-	printf("\n In %i ms,  %i Shapes \n DONE!!!!", (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count(), shapes.size());
+	 auto  const start = clock();// std::chrono::steady_clock::now();
+	 printf("Pass %i", numberOfPasses);
+	 
+	 while (numberOfPasses > 0) {
+		#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
+		 for (int y = 0; y < height; y++) {
+			 for (int x = 0; x < width; x++) {
+				 float const dx = 2.0f * ((x/* + (float)(myrandom(RNGen))*/) / (float)width) - 1.0f;
+				 float const dy = 2.0f * ((y/* + (float)(myrandom(RNGen))*/) / (float)height) - 1.0f;
+				 Ray r(camera_->eye_, dx * X + dy * Y + Z);
+				 if (false) {
+					 if (kdtree) {
+						 Minimizer minimizer(r);
+						 BVMinimize(Tree, minimizer);
+						 if (minimizer.minIntersection.t != INFINITY)
+							 image[y * width + x] = ReturnColor(minimizer.minIntersection, optionDraw);
+					 }
+					 else {
+						 float minTime = INFINITY;
+						 for (unsigned int i = 0; i < shapes.size(); ++i) {
+							 Intersection intersection;
+							 if (shapes[i]->Intersect(r, intersection)) {
+								 if (intersection.t < minTime) {// compare 
+									 minTime = intersection.t;
+									 image[y * width + x] = ReturnColor(intersection, optionDraw);
+								 }
+							 }
+						 }
+					 }
+				 }
+				 else {
+					 Tracer tracer;
+					 image[y * width + x] += tracer.TraceRay(r, lights, Tree, 0.01f);
+				 }
+			 }
+		 }
+		 numberOfPasses--;
+		 printf(", %i",numberOfPasses);
+	 }
+	//printf("\n In %i ms,  %i Shapes \n DONE!!!!", (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count(), shapes.size());
 }
+

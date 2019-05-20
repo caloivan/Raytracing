@@ -6,9 +6,11 @@ class Intersection;
 const float PI = 3.14159265358979323846f;
 const float Radians = PI / 180.0f;
 const float epsilon = 0.000001f; //min distance offset for interseptions
+#define RUSSIAN_ROULETTE 0.8f
 ////////////////////////////////////////////////////////////////////////
 // Material: encapsulates a BRDF and communication with a shader.
 ////////////////////////////////////////////////////////////////////////
+
 class Material
 {
  public:
@@ -18,12 +20,11 @@ class Material
     virtual bool isLight() { return false; }
 
     Material()  : Kd(Vector3f(1.0, 0.5, 0.0)), Ks(Vector3f(1,1,1)), alpha(1.0), texid(0) {}
-    Material(const Vector3f d, const Vector3f s, const float a) 
-        : Kd(d), Ks(s), alpha(a), texid(0) {}
+    Material(const Vector3f d, const Vector3f s, const float a) : Kd(d), Ks(s), alpha(a), texid(0) {}
     Material(Material& o) { Kd=o.Kd;  Ks=o.Ks;  alpha=o.alpha;  texid=o.texid; }
-
     void setTexture(const std::string path);
     //virtual void apply(const unsigned int program);
+	~Material() {};
 };
 
 ////////////////////////////////////////////////////////////////////////
@@ -134,6 +135,14 @@ public:
 	Intersection() {
 		t = INFINITY;//time of interception
 		s = nullptr;// shape interceted;
+		U = 0;
+		V = 0;
+	}
+	Intersection(float _time, Shape* _shape, Vector3f _P, Vector3f _N) {
+		t = _time;
+		p = _P;
+		n = _N;
+		s = _shape;
 	}
 
 	void SetIntersection(float _time, Shape* _shape, Vector3f _P, Vector3f _N) {
@@ -232,7 +241,7 @@ public:
 		return true;
 	}
 	Bbox  returnBbox() { return boundingBox; }
-	float Sphere::get_area() { return 4 * PI* (radius * radius); }
+	float Sphere::get_area() { return 4 * PI * (radius * radius); }
 };
 
 class Box :public Shape{
