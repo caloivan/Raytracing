@@ -1,6 +1,12 @@
-int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
+﻿int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
 int kdtree = 1;
 int numberOfPasses = 50;  // if passes = 1 then raytracing, else path tracing
+
+bool Boxes = true;
+bool Cylinders = true;
+bool Spheres = true;
+
+bool Project1 = false;
 #define EXPLICIT_
 
 typedef enum {
@@ -25,7 +31,7 @@ typedef enum {
 
 #include <random>
 #include <chrono>// measure time
-std::mt19937_64 RNGen;// A good quality *thread-safe* Mersenne Twister random number generator.
+std::mt19937_64 RNGen,RNGen2;// A good quality *thread-safe* Mersenne Twister random number generator.
 std::uniform_real_distribution<> myrandom(0 , 1.0f);
 // Call myrandom(RNGen) to get a uniformly distributed random number in [0,1].
 ///************************** KDTREE SECTION ***************************************///
@@ -55,7 +61,7 @@ public:
 		if (tMi > tMa || tMa <= epsilon) return false;// invalid behavior  //both behind ray
 
 		tMi = tMi > epsilon ? tMi : 0; //minimum interception in front of camera, if ray starts inside box, return 0
-		_inter.SetIntersection(tMi, this, _ray.eval(tMi), Vector3f(0, 0, 0));// normal doesnt matters, cause here is a rough intersection
+		_inter.Set(tMi, this, _ray.eval(tMi), Vector3f(0, 0, 0));// normal doesnt matters, cause here is a rough intersection
 
 		return true;
 	}
@@ -91,82 +97,82 @@ Bbox bounding_box(Shape* shape) { return shape->returnBbox(); }
 
 class Tracer
 {
-	Color C;
-	Color W;
+	
+
+	//___________________________________________________________________
+	////Convert between angular measure and area measure
+	//float GeometryFactor(Intersection& A, Intersection& B) {
+	//	const Vector3f  D = A.p - B.p;
+	//	return fabsf( A.n.dot(D) * B.n.dot(D) / powf(D.dot(D),2));
+	//};
+
+	/*float PdfLight(Intersection& result) {
+		return 1.0f / result.s->get_area();
+	};*/
+
 	//Choose a uniformly distributed point on a sphere with center C and radius R
-	void  SampleSphere(Sphere* sphere,Intersection &result) {
+
+	//Intersection  SampleLight(std::vector<Shape*>& lights) {
+	//	Intersection result;
+	//	Sphere* sph = (Sphere*)lights[0];
+	//	result.s = sph;
+	//	SampleSphere(sph, result );//fills  Normal and Point of intersection
+	//	return result;
+	//};
+	//___________________________________________________________________
+
+	void  SampleSphere(Sphere* sphere, Intersection& result) {
 		const float z = 2 * myrandom(RNGen) - 1.0f;
 		const float r = sqrtf(1 - z * z);
 		const float a = 2 * PI * myrandom(RNGen);
 		result.n = Vector3f(r * cos(a), r * sin(a), z);
 		result.p = sphere->center_ + result.n * sphere->radius;
 	};
-	Intersection  SampleLight(std::vector<Shape*>& lights) {
-		Intersection result;
-		Sphere* sph = (Sphere*)lights[0];
-		result.s = sph;
-		SampleSphere(sph, result );//fills  Normal and Point of intersection
-		return result;
-	};
-	Vector3f SampleBrdf(Vector3f& normal ) {
-		return SampleLobe(normal, sqrtf(myrandom(RNGen)), 2 * PI * (myrandom(RNGen))).normalized();
+
+	Vector3f SampleBrdf(Vector3f & normal) {
+		return SampleLobe(normal, sqrtf(myrandom(RNGen)), 2 * PI * myrandom(RNGen)).normalized();
 	}
-	//Vector3f  SampleBrdf(const ChoiceType& choice, Vector3f& normal, Vector3f& wo, Shape*);
+
 	Vector3f  SampleLobe(Vector3f normal, float r1, float r2) {
 		float s = sqrtf(1 - (r1 * r1));
 		Vector3f k = Vector3f(s * cosf(r2), s * sinf(r2), r1);
 		Quaternionf q = Quaternionf::FromTwoVectors(Vector3f::UnitZ(), normal);
 		return q._transformVector(k);
 	};
-	//Convert between angular measure and area measure
-	float GeometryFactor(Intersection& A, Intersection& B) {
-		Vector3f D = A.p - B.p;
-		return fabsf(A.n.dot(D)*B.n.dot(D)/powf(D.dot(D),2));
-	};
 
-	float PdfLight(Intersection& result) {
-		return 1.0f / result.s->get_area();
-	};
-
-	float PdfBrdf(Vector3f& normal, Vector3f& wi) {
+	float PdfBrdf(const Vector3f normal,const  Vector3f wi) {
 		return fabsf(normal.dot(wi)) / PI;
 	};
-	float PhongD(Vector3f& normal, Vector3f& m, float& alpha);
-	float PhongG(Vector3f& wo, Vector3f& wi, Vector3f& m, Vector3f& N, float& alpha);
-	float PhondG1(Vector3f& v, Vector3f& m, Vector3f& N, float& alpha);
+	
 	Color EvalScattering(Vector3f& normal, Vector3f& wi, Shape * shape) {
-		return fabsf(normal.dot(wi)) * shape->material->Kd/ PI;
+		return fabsf( normal.dot(wi)) * shape->material->Kd / PI;
 	};
-
-	Color EvalScattering(const ChoiceType& choice, Vector3f& normal, Vector3f& wi, Vector3f& wo, Shape*, float& t);
-	Color EvalBrdf(const ChoiceType& choice, Vector3f& normal, Vector3f& wi, Vector3f& wo, Shape*, float& t);
-	Color Fresnel(const float& d, Shape* shp);
 
 public:
 	Tracer() {};
 	~Tracer() {};
-	Intersection FindIntersection(Ray& ray, KdBVH<float, 3, Shape*>& tree ) {
+	Intersection FindIntersection(Ray ray, KdBVH<float, 3, Shape*> tree ) {
 		Intersection p;
 		Minimizer minimizer(ray);
 		BVMinimize(tree, minimizer);
 		return minimizer.minIntersection;
 	};
 
-	Color TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Shape*>& tree_, float deltaTime) {
-		C = Color(0.0f, 0.0f, 0.0f); 
-		W = Color(0.0f, 0.0f, 0.0f);
-		Intersection P = FindIntersection(ray,tree_);
-		if (!P.s) return C;// no intersection
+	Color TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Shape*>& tree) {
+		Color C = Color(0.0f, 0.0f, 0.0f);
+		Color W = Color(1.0f, 1.0f, 1.0f);
+		Vector3f wi, wo;//  
+		float p;// PDF probability for color to happens
+		Intersection P = FindIntersection(ray,tree);
+		if (!P.s) return C; // no intersection
 		if (P.s->isLight)  return P.s->material->Kd;// is light KD
-
-		Vector3f wi, wo = -ray.D;
 		while (myrandom(RNGen) <= RUSSIAN_ROULETTE) {
 			Vector3f normal = P.n;
-			float p;
+
 #ifdef EXPLICIT	// Explicit light connection
 			Intersection L = SampleLight(lights);// Shadow Light
 			p = PdfLight(L) / GeometryFactor(P, L);//Probability for that event to happen
-			wo = ray.D;
+			Vector3f wo = -ray.D;
 			wi = L.p - P.p;
 			P.p = P.p + wo * 0.0001f;
 			Ray  I(P.p, wi);//Shadow Ray
@@ -176,22 +182,27 @@ public:
 				C += W * f / p * (Color)P.s->material->Kd;
 			}
 #endif
-		//Extend Path
-			wi = SampleBrdf(normal);// Choose a sample direction from P
-			P.p = P.p + wi * 0.0001f;
-			Ray ExtendPath(P.p, wi);
-			Intersection Q = FindIntersection(ExtendPath, tree_);
-			if (!Q.s) break;
-			Color f = EvalScattering(normal, wi, Q.s);
-			p = PdfBrdf(normal, wi) * RUSSIAN_ROULETTE;
-			if (p < epsilon) break;
+
+			wi = SampleBrdf(normal);// //Extend Path predict where the ray came from
+			P.p += wi * 0.0001f; //fixing position outside shape. 
+			Ray wiRay(P.p , wi); 
+			Intersection Q = FindIntersection(wiRay, tree);
+			if (!Q.s) {
+				C = Color(0.0f, 0.0f, 0.0f); 
+				break;
+			}
+			Color f = EvalScattering(normal, wi, P.s);//
+			p = PdfBrdf(normal, wi) * RUSSIAN_ROULETTE; //how possible is that event
+			if (p < epsilon) { //if there is not posibility
+				C = Color(0.0f, 0.0f, 0.0f);
+				break; 
+			}
 			W *= f / p;
-		//Implicit Light Connection
-			if (Q.s->material->isLight()) {
+			if (Q.s->material->isLight()) {	//Implicit Light Connection
 				C += W * (Color)Q.s->material->Kd;
 				break;
 			}
-			P.SetIntersection(Q); //Prepare next possible ray rebound
+			P.Set(Q); //Prepare next possible ray rebound
 		}
 		return C;
 	};
@@ -302,7 +313,7 @@ void Scene::Command(const std::vector<std::string>& strings, const std::vector<f
         // Creates a Material instance to be picked up by successive shapes
         currentMat = new Light(Vector3f(f[1], f[2], f[3])); }
    
-    else if (c == "sphere") {
+    else if (c == "sphere" && Spheres) {
         // syntax: sphere x y z   r
         // Creates a Shape instance for a sphere defined by a center and radius
 		Shape* mySPhere = new Sphere(Vector3f(f[1], f[2], f[3]),    f[4],    currentMat);
@@ -313,14 +324,14 @@ void Scene::Command(const std::vector<std::string>& strings, const std::vector<f
 		}
 	}
 
-    else if (c == "box") {
+    else if (c == "box" && Boxes) {
         // syntax: box bx by bz   dx dy dz
         // Creates a Shape instance for a box defined by a corner point and diagonal vector
 		Shape* myBox = new Box(Vector3f(f[1], f[2], f[3]), Vector3f(f[4], f[5], f[6]), currentMat);
 		shapes.push_back(myBox);
 	}
 
-    else if (c == "cylinder") {
+    else if (c == "cylinder" && Cylinders) {
         // syntax: cylinder bx by bz   ax ay az  r
         // Creates a Shape instance for a cylinder defined by a base point, axis vector, and radius
 		Shape* myCylinder = new Cylinder(Vector3f(f[1], f[2], f[3]), Vector3f(f[4], f[5], f[6]), f[7], currentMat);
@@ -373,17 +384,17 @@ void Scene::TraceImage(Color* image, const int pass)
 	 Vector3f const Z = -1.0f *                camera_->orientation_._transformVector(Vector3f::UnitZ());
 
 	 KdBVH<float, 3, Shape*> Tree(shapes.begin(), shapes.end());
-	 auto  const start = clock();// std::chrono::steady_clock::now();
-	 printf("Pass %i", numberOfPasses);
+	 auto start = std::chrono::steady_clock::now();
+	 printf("Pass ");
 	 
-	 while (numberOfPasses > 0) {
+	 do {
 		#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
 		 for (int y = 0; y < height; y++) {
 			 for (int x = 0; x < width; x++) {
 				 float const dx = 2.0f * ((x/* + (float)(myrandom(RNGen))*/) / (float)width) - 1.0f;
 				 float const dy = 2.0f * ((y/* + (float)(myrandom(RNGen))*/) / (float)height) - 1.0f;
 				 Ray r(camera_->eye_, dx * X + dy * Y + Z);
-				 if (false) {
+				 if (Project1) {
 					 if (kdtree) {
 						 Minimizer minimizer(r);
 						 BVMinimize(Tree, minimizer);
@@ -405,13 +416,15 @@ void Scene::TraceImage(Color* image, const int pass)
 				 }
 				 else {
 					 Tracer tracer;
-					 image[y * width + x] += tracer.TraceRay(r, lights, Tree, 0.01f);
+					 image[y * width + x] += tracer.TraceRay(r, lights, Tree);
 				 }
 			 }
 		 }
+		 printf(" %i",numberOfPasses);
 		 numberOfPasses--;
-		 printf(", %i",numberOfPasses);
-	 }
-	//printf("\n In %i ms,  %i Shapes \n DONE!!!!", (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count(), shapes.size());
+	 } while (numberOfPasses > 0 && !Project1 );
+	 printf("  at : %i ms\n",  (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
 }
 
+//PDF probability density function
+//PDFBRDF

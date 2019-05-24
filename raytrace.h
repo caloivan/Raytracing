@@ -145,13 +145,13 @@ public:
 		s = _shape;
 	}
 
-	void SetIntersection(float _time, Shape* _shape, Vector3f _P, Vector3f _N) {
+	void Set(float _time, Shape* _shape, Vector3f _P, Vector3f _N) {
 		t = _time;
+		s = _shape;
 		p = _P;
 		n = _N;
-		s = _shape;
 	}
-	void SetIntersection(Intersection B) {
+	void Set(Intersection B) {
 		t = B.t;
 		s = B.s;
 		p = B.p;
@@ -237,7 +237,7 @@ public:
 		if (tempo == 0) return false;
 		Vector3f intersectionPoint = ray.eval(tempo);
 		Vector3f normal = intersectionPoint -  center_;// (intersectionPoint – center_);
-		_inter.SetIntersection(tempo, this, intersectionPoint, normal.normalized());// Object intercepted  
+		_inter.Set(tempo, this, intersectionPoint, normal.normalized());// Object intercepted  
 		return true;
 	}
 	Bbox  returnBbox() { return boundingBox; }
@@ -274,7 +274,7 @@ public :
 			tMi == intervalY.t1 ? Vector3f(0, -1, 0) :
 			tMi == intervalZ.t0 ? Vector3f(0, 0, 1) :
 			Vector3f(0, 0, -1);
-		_inter.SetIntersection(tMi, this, _ray.eval(tMi), normal);
+		_inter.Set(tMi, this, _ray.eval(tMi), normal);
 		return true;
 	}
 	Bbox  returnBbox() { return boundingBox; }
@@ -375,7 +375,7 @@ public:
 
 		//Creating an Interception
 		Vector3f InterceptionPoint = ray2.eval(tIntersection);
-		_inter.SetIntersection(tIntersection, this, InterceptionPoint, normal);
+		_inter.Set(tIntersection, this, InterceptionPoint, normal);
 
 		float theta = atan2(normal(1), normal(0));
 		Vector2f uv(theta / (2.0f * PI), normal(2) / height);
@@ -422,7 +422,7 @@ public:
 		float t = E2.dot(q) * dInv;
 		if (t < epsilon) return false; //  intersect behind eeye
 
-		_inter.SetIntersection(t, this, _ray.eval(t), normal);
+		_inter.Set(t, this, _ray.eval(t), normal);
 		return  true;
 	}
 	Bbox  returnBbox() { return boundingBox; }
