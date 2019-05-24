@@ -1,4 +1,4 @@
-﻿int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
+﻿
 int kdtree = 1;
 int numberOfPasses = 50;  // if passes = 1 then raytracing, else path tracing
 
@@ -7,7 +7,9 @@ bool Cylinders = true;
 bool Spheres = true;
 
 bool Project1 = false;
-#define EXPLICIT_
+int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
+
+#define EXPLICIT
 
 typedef enum {
 	E_DIFFUSE,
@@ -97,29 +99,24 @@ Bbox bounding_box(Shape* shape) { return shape->returnBbox(); }
 
 class Tracer
 {
-	
-
-	//___________________________________________________________________
 	////Convert between angular measure and area measure
-	//float GeometryFactor(Intersection& A, Intersection& B) {
-	//	const Vector3f  D = A.p - B.p;
-	//	return fabsf( A.n.dot(D) * B.n.dot(D) / powf(D.dot(D),2));
-	//};
+	float GeometryFactor(Intersection& A, Intersection& B) {
+		const Vector3f  D = A.p - B.p;
+		return fabsf( A.n.dot(D) * B.n.dot(D) / powf(D.dot(D),2));
+	};
 
-	/*float PdfLight(Intersection& result) {
+	float PdfLight(Intersection& result) {
 		return 1.0f / result.s->get_area();
-	};*/
+	};
 
 	//Choose a uniformly distributed point on a sphere with center C and radius R
-
-	//Intersection  SampleLight(std::vector<Shape*>& lights) {
-	//	Intersection result;
-	//	Sphere* sph = (Sphere*)lights[0];
-	//	result.s = sph;
-	//	SampleSphere(sph, result );//fills  Normal and Point of intersection
-	//	return result;
-	//};
-	//___________________________________________________________________
+	Intersection  SampleLight(std::vector<Shape*>& lights) {
+		Intersection result;
+		Sphere* sph = (Sphere*)lights[0];
+		result.s = sph; //fills intersection.shape
+		SampleSphere(sph, result );//fills intersection.Normal, intersection.Point
+		return result;
+	};
 
 	void  SampleSphere(Sphere* sphere, Intersection& result) {
 		const float z = 2 * myrandom(RNGen) - 1.0f;
@@ -176,13 +173,12 @@ public:
 			wi = L.p - P.p;
 			P.p = P.p + wo * 0.0001f;
 			Ray  I(P.p, wi);//Shadow Ray
-			Intersection inters = FindIntersection(I, tree_);
+			Intersection inters = FindIntersection(I, tree);
 			if (p > 0 && inters.s && inters.p == P.p) {
 				Color f = EvalScattering(normal, wi, P.s);
 				C += W * f / p * (Color)P.s->material->Kd;
 			}
 #endif
-
 			wi = SampleBrdf(normal);// //Extend Path predict where the ray came from
 			P.p += wi * 0.0001f; //fixing position outside shape. 
 			Ray wiRay(P.p , wi); 
@@ -391,8 +387,8 @@ void Scene::TraceImage(Color* image, const int pass)
 		#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
 		 for (int y = 0; y < height; y++) {
 			 for (int x = 0; x < width; x++) {
-				 float const dx = 2.0f * ((x/* + (float)(myrandom(RNGen))*/) / (float)width) - 1.0f;
-				 float const dy = 2.0f * ((y/* + (float)(myrandom(RNGen))*/) / (float)height) - 1.0f;
+				 float const dx = 2.0f * (x + (float)(myrandom(RNGen)) / (float)width) - 1.0f;
+				 float const dy = 2.0f * (y + (float)(myrandom(RNGen)) / (float)height) - 1.0f;
 				 Ray r(camera_->eye_, dx * X + dy * Y + Z);
 				 if (Project1) {
 					 if (kdtree) {
