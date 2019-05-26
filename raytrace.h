@@ -16,14 +16,26 @@ class Material
  public:
     Vector3f Kd, Ks;
     float alpha;
+	float probabilityDiffuse;
+	float probabilityReflection;
+	float totalProbability;
+	float kd_len_;
+	float ks_len_;
     unsigned int texid;
     virtual bool isLight() { return false; }
 
-    Material()  : Kd(Vector3f(1.0, 0.5, 0.0)), Ks(Vector3f(1,1,1)), alpha(1.0), texid(0) {}
-    Material(const Vector3f d, const Vector3f s, const float a) : Kd(d), Ks(s), alpha(a), texid(0) {}
-    Material(Material& o) { Kd=o.Kd;  Ks=o.Ks;  alpha=o.alpha;  texid=o.texid; }
+    Material()  : Kd(Vector3f(1.0, 0.5, 0.0)), Ks(Vector3f(1,1,1)), alpha(1.0), texid(0) { CalculateProbablities(); }
+    Material(const Vector3f d, const Vector3f s, const float a) : Kd(d), Ks(s), alpha(a), texid(0) { CalculateProbablities(); }
+    Material(Material& o) { Kd=o.Kd;  Ks=o.Ks;  alpha=o.alpha;  texid=o.texid; CalculateProbablities();
+	}
     void setTexture(const std::string path);
-    //virtual void apply(const unsigned int program);
+	void CalculateProbablities() {
+		kd_len_ = Kd.norm();
+		ks_len_ = Ks.norm();
+		totalProbability = Kd.norm() + Ks.norm();
+		probabilityDiffuse = Kd.norm() / totalProbability;
+		probabilityReflection = 1 - probabilityDiffuse;
+	}
 	~Material() {};
 };
 

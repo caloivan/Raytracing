@@ -7,14 +7,14 @@ bool Cylinders = true;
 bool Spheres = true;
 
 bool Project1 = false;
-#define EXPLICIT_
+#define EXPLICIT
 
 typedef enum {
-	E_DIFFUSE,
-	E_REFLECTION,
-	E_TRANSMISSION,
-	E_ALL
-}ChoiceType;
+	DIFFUSE,
+	REFLECTION,
+	TRANSMISSION,
+	ALL
+}Interaction;
 
 //////////////////////////////////////////////////////////////////////
 // Provides the framework for a raytracer.
@@ -97,40 +97,24 @@ Bbox bounding_box(Shape* shape) { return shape->returnBbox(); }
 
 class Tracer
 {
-	
-
-	//___________________________________________________________________
-	////Convert between angular measure and area measure
-	//float GeometryFactor(Intersection& A, Intersection& B) {
-	//	const Vector3f  D = A.p - B.p;
-	//	return fabsf( A.n.dot(D) * B.n.dot(D) / powf(D.dot(D),2));
-	//};
-
-	/*float PdfLight(Intersection& result) {
-		return 1.0f / result.s->get_area();
-	};*/
-
-	//Choose a uniformly distributed point on a sphere with center C and radius R
-
-	//Intersection  SampleLight(std::vector<Shape*>& lights) {
-	//	Intersection result;
-	//	Sphere* sph = (Sphere*)lights[0];
-	//	result.s = sph;
-	//	SampleSphere(sph, result );//fills  Normal and Point of intersection
-	//	return result;
-	//};
-	//___________________________________________________________________
-
 	void  SampleSphere(Sphere* sphere, Intersection& result) {
-		const float z = 2 * myrandom(RNGen) - 1.0f;
-		const float r = sqrtf(1 - z * z);
-		const float a = 2 * PI * myrandom(RNGen);
+		const float z = 2.0f * myrandom(RNGen) - 1.0f;
+		const float r = sqrtf(1.0f - z * z);
+		const float a = 2.0f * PI * myrandom(RNGen);
 		result.n = Vector3f(r * cos(a), r * sin(a), z);
 		result.p = sphere->center_ + result.n * sphere->radius;
 	};
 
-	Vector3f SampleBrdf(Vector3f & normal) {
-		return SampleLobe(normal, sqrtf(myrandom(RNGen)), 2 * PI * myrandom(RNGen)).normalized();
+	////Phong BRDF
+	Vector3f SampleBrdf(Interaction interaction, Vector3f& wo, Vector3f& normal, Shape* shape)
+	{
+		if (interaction == DIFFUSE) {
+			return SampleLobe(normal, sqrtf(myrandom(RNGen)), 2 * PI * myrandom(RNGen)).normalized();
+		}
+		else {// REFLECTION
+			Vector3f m = SampleLobe(normal, pow(myrandom(RNGen), 1.0f / (shape->material->alpha + 1.0f)), 2.0f * PI * myrandom(RNGen));
+			return  2.0f * (wo.dot(m) * m - wo);
+		}
 	}
 
 	Vector3f  SampleLobe(Vector3f normal, float r1, float r2) {
@@ -140,13 +124,87 @@ class Tracer
 		return q._transformVector(k);
 	};
 
-	float PdfBrdf(const Vector3f normal,const  Vector3f wi) {
-		return fabsf(normal.dot(wi)) / PI;
+
+	float PdfBrdf(const  Vector3f wo,  Vector3f normal, const  Vector3f wi, Shape* shape) {
+		float  Pd = fabsf(normal.dot(wi)) / PI;
+
+		Vector3f m = (wo + wi).normalized();
+		float Pr = D(normal, m, shape->material->alpha) * m.dot(normal) * (1 / (fabsf(wi.dot(m))));
+
+		return Pd * shape->material->probabilityDiffuse + Pr * shape->material->probabilityReflection;
+	};
+
+	float PdfLight(Intersection& result) {
+		return 1.0f / result.s->get_area();
+	};
+
+	////Convert between angular measure and area measure
+	float GeometryFactor(Intersection& A, Intersection& B) {
+		const Vector3f  D = A.p - B.p;
+		return fabsf(A.n.dot(D) * B.n.dot(D) / powf(D.dot(D), 2));
+	};
+
+	//Choose a uniformly distributed point on a sphere with center C and radius R
+	Intersection  SampleLight(std::vector<Shape*>& lights) {
+		Intersection result;
+		Sphere* sph = (Sphere*)lights[0];
+		result.s = sph; //fills intersection.shape
+		SampleSphere(sph, result);//fills intersection.Normal, intersection.Point
+		return result;
 	};
 	
 	Color EvalScattering(Vector3f& normal, Vector3f& wi, Shape * shape) {
 		return fabsf( normal.dot(wi)) * shape->material->Kd / PI;
 	};
+
+	Color EvalScattering(Vector3f wo, Vector3f& normal, Vector3f& wi, Shape* shape)
+	{
+		Color Ed = shape->material->Kd / PI;
+		//Portion EvalBRDF	
+		Vector3f m = (wo + wi).normalized();
+		Color numerator = 
+			D(normal, m, shape->material->alpha) * 
+			G(wo, normal, wi, m, shape->material->alpha ) * 
+			F(wi.dot(m), shape->material->Ks);
+		float denominator = 4.0f * fabsf(wi.dot(normal)) * fabsf(wo.dot(normal));
+		Color Er = numerator / denominator;
+
+		return fabsf(normal.dot(wi)) * (Ed + Er);
+	};
+
+	//phong Fresnel
+	Color F(float wiDOTm, Color Ks)
+	{
+		return Ks + (Color(1, 1, 1) - Ks) * (pow(1 - fabs(wiDOTm), 5));
+	}
+
+	////Phong - distribution factor 
+	float D(Vector3f normal, Vector3f m, float alpha)
+	{
+		return m.dot(normal) > 0.0f ?	((alpha + 2.0f) / (2.0f * PI)) * powf( m.dot(normal), alpha )     :   0;
+	}
+
+	//Phong geometric attenuation term
+	float G(Vector3f wo , Vector3f& normal, Vector3f wi, Vector3f m, float alpha)
+	{
+		return G1(wi, m, normal, alpha) * G1(wo, m, normal, alpha);
+	}
+
+
+	float G1(Vector3f & v, Vector3f & m, Vector3f & N, float& alpha) {
+		float const vDOTn = v.dot(N);
+		if (vDOTn > 1.0f)  return 1.0f;
+		float const tanTheta = sqrtf(1.0f - (vDOTn * vDOTn)) / vDOTn;
+		if (tanTheta == 0.0f) return 1.0f;
+
+		float const a = sqrtf(((alpha / 2.0f) + 1.0f)) / fabsf(tanTheta);
+		if (a < 1.6f) {
+			float const  res = (3.535f * a + 2.181f * a * a)  /  (1.0f + 2.276f * a + 2.577f * a * a);
+			return  v.dot(m) / vDOTn > 0.0f ? res : 0.0f;
+		}
+		else
+			return v.dot(m) / vDOTn > 0.0f ? 1.0f : 0.0f;
+	}
 
 public:
 	Tracer() {};
@@ -161,7 +219,7 @@ public:
 	Color TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Shape*>& tree) {
 		Color C = Color(0.0f, 0.0f, 0.0f);
 		Color W = Color(1.0f, 1.0f, 1.0f);
-		Vector3f wi, wo;//  
+		Vector3f wi, wo = -ray.D;;//  
 		float p;// PDF probability for color to happens
 		Intersection P = FindIntersection(ray,tree);
 		if (!P.s) return C; // no intersection
@@ -176,14 +234,14 @@ public:
 			wi = L.p - P.p;
 			P.p = P.p + wo * 0.0001f;
 			Ray  I(P.p, wi);//Shadow Ray
-			Intersection inters = FindIntersection(I, tree_);
+			Intersection inters = FindIntersection(I, tree);
 			if (p > 0 && inters.s && inters.p == P.p) {
-				Color f = EvalScattering(normal, wi, P.s);
+				Color f = EvalScattering(wo, normal, wi, P.s);
 				C += W * f / p * (Color)P.s->material->Kd;
 			}
 #endif
-
-			wi = SampleBrdf(normal);// //Extend Path predict where the ray came from
+			Interaction myInteraction = myrandom(RNGen) < P.s->material->probabilityDiffuse ? DIFFUSE : REFLECTION;
+			wi = SampleBrdf(myInteraction, wo, normal, P.s);// //Extend Path predict where the ray came from
 			P.p += wi * 0.0001f; //fixing position outside shape. 
 			Ray wiRay(P.p , wi); 
 			Intersection Q = FindIntersection(wiRay, tree);
@@ -191,8 +249,8 @@ public:
 				C = Color(0.0f, 0.0f, 0.0f); 
 				break;
 			}
-			Color f = EvalScattering(normal, wi, P.s);//
-			p = PdfBrdf(normal, wi) * RUSSIAN_ROULETTE; //how possible is that event
+			Color f = EvalScattering(wo, normal, wi, P.s);//
+			p = PdfBrdf(wo, normal, wi, P.s) * RUSSIAN_ROULETTE; //how possible is that event
 			if (p < epsilon) { //if there is not posibility
 				C = Color(0.0f, 0.0f, 0.0f);
 				break; 
@@ -203,6 +261,7 @@ public:
 				break;
 			}
 			P.Set(Q); //Prepare next possible ray rebound
+			wo = -wi;
 		}
 		return C;
 	};
@@ -384,15 +443,15 @@ void Scene::TraceImage(Color* image, const int pass)
 	 Vector3f const Z = -1.0f *                camera_->orientation_._transformVector(Vector3f::UnitZ());
 
 	 KdBVH<float, 3, Shape*> Tree(shapes.begin(), shapes.end());
-	 auto start = std::chrono::steady_clock::now();
-	 printf("Pass ");
+	 auto const start = std::chrono::steady_clock::now();
+	 printf("Pass \n");
 	 
 	 do {
 		#pragma omp parallel for schedule(dynamic, 1) // Magic: Multi-thread y loop
 		 for (int y = 0; y < height; y++) {
 			 for (int x = 0; x < width; x++) {
-				 float const dx = 2.0f * ((x/* + (float)(myrandom(RNGen))*/) / (float)width) - 1.0f;
-				 float const dy = 2.0f * ((y/* + (float)(myrandom(RNGen))*/) / (float)height) - 1.0f;
+				 float const dx = 2.0f * ((x + (float)(myrandom(RNGen))) / (float)width) - 1.0f;
+				 float const dy = 2.0f * ((y + (float)(myrandom(RNGen))) / (float)height) - 1.0f;
 				 Ray r(camera_->eye_, dx * X + dy * Y + Z);
 				 if (Project1) {
 					 if (kdtree) {
