@@ -56,7 +56,7 @@ void recurseModelNodes(Scene* scene,
     // Loop through this node's meshes
     for (unsigned int i=0;  i<node->mNumMeshes; ++i) {
         aiMesh* aimesh = aiscene->mMeshes[node->mMeshes[i]];
-        printf("%d:%d ", aimesh->mNumVertices, aimesh->mNumFaces);
+     ///   printf("%d:%d ", aimesh->mNumVertices, aimesh->mNumFaces);
 
         // Extract this node's surface material.
         aiString texPath;
@@ -110,7 +110,7 @@ void recurseModelNodes(Scene* scene,
         meshdata->mat = material;
         scene->triangleMesh(meshdata); }
 
-    printf("\n");
+   /// printf("\n");
 
     // Recurse onto this node's children
     for (unsigned int i=0;  i<node->mNumChildren;  ++i)
