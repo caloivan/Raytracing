@@ -125,13 +125,18 @@ class Tracer
 		return q._transformVector(k);
 	};
 
-	float PdfBrdf(Interaction & miInteraction, const  Vector3f& wo,  Vector3f& normal, const  Vector3f& wi, Shape* shape) {
+	float PdfBrdf( const  Vector3f& wo,  Vector3f& normal, const  Vector3f& wi, Shape* shape) {
 		float  Pd = fabsf(wi.dot(normal)) / PI;
+		
 		Vector3f m = (wo + wi).normalized();
 		float Pr = D(normal, m, shape->material->alpha) * m.dot(normal) / (fabsf(wi.dot(m)));
 
+		float Pt = 0;
+
+
 		return Pd * shape->material->probabilityDiffuse + 
-			   Pr * shape->material->probabilityReflection;
+			   Pr * shape->material->probabilityReflection + 
+			   Pt * shape->material->probabilityTransmission;
 	};
 
 	float PdfLight(const Intersection& result) {
@@ -203,11 +208,12 @@ public:
 		BVMinimize(tree, minimizer);
 		return minimizer.minIntersection;
 	};
-
+//Project 4 include  transmission across the microfacet surface in and through objects
 	Color TraceRay(Ray& ray, std::vector<Shape*>& lights,const KdBVH<float, 3, Shape*>& tree) {
 		Color C = Color(0.0f, 0.0f, 0.0f)  ,  W = Color(1.0f, 1.0f, 1.0f);
 		Vector3f wi, wo = -ray.D;;//  
 		float p;// PDF probability for color to happens
+		float q;// probability that explicit light  could be chossen implicitly
 		Intersection P = FindIntersection(ray,tree);
 		if (!P.s) return C; // no intersection
 		if (P.s->isLight)  return P.s->material->Kd;// is light KD
@@ -217,6 +223,7 @@ public:
 #ifdef EXPLICIT	// Explicit light connection
 			Intersection L = SampleLight(lights);// Shadow Light
 			p = PdfLight(L) / GeometryFactor(P, L);//Probability for that event to happen
+			q = PdfBrdf(  wo, normal, wi, P.s) * RUSSIAN_ROULETTE;
 			Vector3f wo = -ray.D;
 			wi = L.p - P.p;
 			P.p = P.p + wo * 0.0001f;
@@ -238,7 +245,7 @@ public:
 			}
 			//Color f = fabsf(normal.dot(wi)) * (EvalBrdf(myInteraction, normal, wo, wi, P.s));// (p.object_->get_material()->Kd / M_PI);
 			Color f = EvalScattering(wo, normal, wi, P.s);//
-			p = PdfBrdf(myInteraction, wo, normal, wi, P.s) * RUSSIAN_ROULETTE; //how possible is that event
+			p = PdfBrdf( wo, normal, wi, P.s) * RUSSIAN_ROULETTE; //how possible is that event
 			if (p < epsilon) { //if there is not posibility
 				C = Color(0.0f, 0.0f, 0.0f);
 				break; 
@@ -346,15 +353,19 @@ void Scene::Command(const std::vector<std::string>& strings, const std::vector<f
         //realtime->setAmbient(Vector3f(f[1], f[2], f[3])); 
 	}
 
-    else if (c == "brdf")  {
-        // syntax: brdf  r g b   r g b  alpha
-        // later:  brdf  r g b   r g b  alpha  r g b ior
-        // First rgb is Diffuse reflection, second is specular reflection.
-        // third is beer's law transmission followed by index of refraction.
-        // Creates a Material instance to be picked up by successive shapes
-		//                           Kd                                Kr	              alpha
-        currentMat = new Material(Vector3f(f[1], f[2], f[3]), Vector3f(f[4], f[5], f[6]), f[7]); }
-
+	else if (c == "brdf") {
+		// syntax: brdf  r g b   r g b  alpha
+		// later:  brdf  r g b   r g b  alpha  r g b ior
+		// First rgb is Diffuse reflection, second is specular reflection.
+		// third is beer's law transmission followed by index of refraction.
+		// Creates a Material instance to be picked up by successive shapes
+		if (f.size() == 12)
+			//                                       Kd                             Kr	                          Ks              alpha
+			currentMat = new Material(Vector3f(f[1], f[2], f[3]), Vector3f(f[4], f[5], f[6]), f[7], Vector3f(f[8], f[9], f[10]), f[11]);
+		else
+			//                           Kd                                Kr	              alpha
+			currentMat = new Material(Vector3f(f[1], f[2], f[3]), Vector3f(f[4], f[5], f[6]), f[7]);
+	}
     else if (c == "light") {
         // syntax: light  r g b   
         // The rgb is the emission of the light

@@ -15,21 +15,21 @@ class Material
 {
 	float totalProbability;
  public:
-    Vector3f Kd, Ks;
-    float alpha;
-	float probabilityDiffuse;
-	float probabilityReflection;
+    Vector3f Kd, Ks, Kt;
+    float alpha, ior, probabilityDiffuse, probabilityReflection, probabilityTransmission;
 	
     virtual bool isLight() { return false; }
     Material()  : Kd(Vector3f(1.0, 0.5, 0.0)), Ks(Vector3f(1,1,1)), alpha(1.0) { CalculateProbablities(); }
     Material(const Vector3f d, const Vector3f s, const float a) : Kd(d), Ks(s), alpha(a) { CalculateProbablities(); }
-    Material(Material& o) { Kd=o.Kd;  Ks=o.Ks;  alpha=o.alpha; CalculateProbablities();
-	}
+    Material(Material& o) { Kd=o.Kd;  Ks=o.Ks;  alpha=o.alpha; CalculateProbablities();}
+	Material(const Vector3f _Kd, const Vector3f s, const float a, const Vector3f t, const float _ior) : Kd(_Kd), Ks(s), alpha(a),  Kt(t), ior(_ior) { CalculateProbablities(); }
+
     void setTexture(const std::string path);
 	void CalculateProbablities() {
 		totalProbability = Kd.norm() + Ks.norm();
 		probabilityDiffuse = Kd.norm() / totalProbability;
 		probabilityReflection = Ks.norm() / totalProbability;
+		probabilityTransmission = Kt.norm() / totalProbability;
 	}
 	~Material() {};
 };
