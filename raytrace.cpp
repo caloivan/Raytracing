@@ -107,14 +107,28 @@ class Tracer
 	};
 
 	////Phong BRDF
-	Vector3f SampleBrdf(const Interaction& interaction,const Vector3f& wo, const Vector3f& normal,const float& alpha)
+	Vector3f SampleBrdf(const Interaction& interaction,const Vector3f& wo, const Vector3f& normal,Shape* shape)
 	{
 		if (interaction == DIFFUSE) {
 			return SampleLobe(normal, sqrtf((float)myrandom(RNGen)), 2 * PI * (float)myrandom(RNGen));
 		}
-		else {// REFLECTION
-			Vector3f m = SampleLobe(normal, pow((float)myrandom(RNGen), 1.0f / (alpha + 1.0f)), 2.0f * PI * (float)myrandom(RNGen));
+		else if (interaction == REFLECTION) { 
+			Vector3f m = SampleLobe(normal, pow((float)myrandom(RNGen), 1.0f / (shape->material->alpha + 1.0f)), 2.0f * PI * (float)myrandom(RNGen));
 			return  2.0f * wo.dot(m) * m - wo;
+		}
+		else /*if (interaction == TRANSMISSION)*/ { 
+			Vector3f m = SampleLobe(normal, pow(myrandom(RNGen), 1.0f / (shape->material->alpha + 1.0f)), 2 * PI * (myrandom(RNGen	)));
+			float woDOTn = wo.dot(normal);
+			float ior = shape->material->ior;
+			float ni = woDOTn < 0 ? ior : 1.0f;
+			float no = woDOTn < 0 ? 1 : ior;
+			float n = ni / no;
+			float woDOTm = wo.dot(m);
+			float radicand = 1.0f - (n * n) * (1 - (woDOTm * woDOTm));
+			if (radicand < 0)
+				return 	(2.0f * woDOTm * m - wo);
+			else
+				return  (((n * (woDOTm)) - (woDOTn >= 0 ? 1 : -1) * sqrtf(radicand)) * m) - n * wo;
 		}
 	}
 
@@ -126,16 +140,34 @@ class Tracer
 	};
 
 	float PdfBrdf( const  Vector3f& wo,  Vector3f& normal, const  Vector3f& wi, Shape* shape) {
+		//DIFFUSE
 		float  Pd = fabsf(wi.dot(normal)) / PI;
-		
+		//REFLECTION
 		Vector3f m = (wo + wi).normalized();
-		float Pr = D(normal, m, shape->material->alpha) * m.dot(normal) / (fabsf(wi.dot(m)));
-
+		float Pr = D(normal, m, shape->material->alpha) * m.dot(normal) / (4.0f * fabsf(wi.dot(m)));
+		
+		//TRANSMISSION
 		float Pt = 0;
+		float ior = shape->material->ior;
+		float woDOTn = wo.dot(normal);
+		float ni = woDOTn < 0 ? ior : 1.0f;
+		float no = woDOTn < 0 ? 1 : ior;
+		float n = ni / no;
+		m = -(wo * ni + wi * no).normalized();
+		float woDOTm = wo.dot(m);
+		float radicand = 1 - (n * n) * (1 - (woDOTm * woDOTm));
 
+		if (radicand < 0.0f) { //total internal reflection
+			m = (wo + wi).normalized();
+			Pt = D(normal, m, shape->material->alpha) * (fabsf(m.dot(normal))) / (4.0f * fabsf(wi.dot(m)));
+		}
+		else {
+			float deno = (no * (wi.dot(m))) + (ni * (woDOTm));
+			Pt = D(normal, m, shape->material->alpha) * fabsf(m.dot(normal)) * no * no * fabsf(wi.dot(m)) / deno / deno;
+		}
 
-		return Pd * shape->material->probabilityDiffuse + 
-			   Pr * shape->material->probabilityReflection + 
+		return Pd * shape->material->probabilityDiffuse       + 
+			   Pr * shape->material->probabilityReflection    + 
 			   Pt * shape->material->probabilityTransmission;
 	};
 
@@ -154,25 +186,27 @@ class Tracer
 	Intersection  SampleLight(const std::vector<Shape*>& lights)
 	{
 		Intersection result;
-		Sphere* sph = (Sphere*)lights[0];
+		Sphere* sph = (Sphere*)lights[myrandom(RNGen) * lights.size()];
 		result.s = sph; //fills intersection.shape
 		SampleSphere(sph, result);//fills intersection.Normal, intersection.Point
 		return result;
 	};
 	
-	
 	Color F(const float& wiDOTm, const Color& Ks)//phong Fresnel
 	{
 		return Ks + (Color(1, 1, 1) - Ks) * (pow(1 - fabs(wiDOTm), 5));
 	}
+
 	float D(const Vector3f& normal,const Vector3f& m,const float& alpha)////Phong - distribution factor
 	{
 		return m.dot(normal) > 0.0f ?	((alpha + 2.0f) / (2.0f * PI)) * powf( m.dot(normal), alpha )     :   0;
 	}
+
 	float G(const Vector3f& wo ,const Vector3f& normal,const Vector3f& wi,const Vector3f& m,const float& alpha)//Phong geometric attenuation term
 	{
 		return G1(wi, m, normal, alpha) * G1(wo, m, normal, alpha);
 	}
+
 	float G1(const Vector3f & v, const  Vector3f & m, const  Vector3f & N, const  float& alpha) {
 		float const vDOTn = v.dot(N);
 		if (vDOTn > 1.0f)  return 1.0f;
@@ -188,16 +222,68 @@ class Tracer
 			return v.dot(m) / vDOTn > 0.0f ? 1.0f : 0.0f;
 	}
 
-	Color EvalScattering(const Vector3f& wo,const Vector3f& normal,const Vector3f& wi, Shape* shape)
+	Color EvalScattering(const Vector3f& wo,const Vector3f& normal,const Vector3f& wi, Shape* shape, float& t)
 	{
+		//DIFUSE
 		Color Ed = shape->material->Kd / PI;
+		
+		//REFLECTION
 		Vector3f m = (wo + wi).normalized();
 		Color Er =  
 			D(normal, m, shape->material->alpha) * 
 			G(wo, normal, wi, m, shape->material->alpha ) * 
 			F(wi.dot(m), shape->material->Ks) /  
 			(4.0f * fabsf(wi.dot(normal)) * fabsf(wo.dot(normal)));
-		return fabsf(normal.dot(wi)) * (Ed + Er);
+
+		//TRANSMISSION
+		Color Et;
+		float ior = shape->material->ior;
+		float alpha = shape->material->alpha;
+		Vector3f materialKt = shape->material->Kt;
+
+		float n = 0.0f;
+		float ni = 1.0f;
+		float no = ior;
+		float atenX = 1.0f;
+		float atenY = 1.0f;
+		float atenZ = 1.0f;
+
+		Vector3f attuenation_;
+		if (wo.dot(normal) < 0.0f) {
+			ni = ior;
+			no = 1.0f;
+			atenX = powf(2.71f, t * log(materialKt.x()));
+			atenY = powf(2.71f, t * log(materialKt.y()));
+			atenZ = powf(2.71f, t * log(materialKt.z()));
+			attuenation_ = Vector3f(atenX, atenY, atenZ);
+		}
+		else {
+			attuenation_ = Vector3f(atenX, atenY, atenZ);
+		}
+		n = ni / no;
+
+		m = -(wo * ni + wi * no).normalized();
+		float woDOTm = wo.dot(m);
+		float woDOTn = fabsf(wo.dot(normal));
+		float wiDOTn = fabsf(wi.dot(normal));
+		float wiDOTm = wi.dot(m);
+
+		float radicand = 1 - (n * n) * (1 - (woDOTm * woDOTm));
+		if (radicand < 0) {
+			float denom = 1.0f / (4.0f * woDOTn * wiDOTn);
+			Et =  (Color)attuenation_* (F(wiDOTm, shape->material->Ks) * D(normal, m, alpha) * G(wo, wi, m, normal, alpha) * denom);
+		}
+		else {
+			float denom = 1.0f / (woDOTn * wiDOTn);
+			float abs_wi_dot_m = fabsf(wiDOTm);
+			float abs_wo_dot_m = fabsf(woDOTm);
+			float no_sqrd = no * no;
+			float numo = abs_wi_dot_m * abs_wo_dot_m * no_sqrd;
+			float deno = (no * (wiDOTm)) + (ni * (woDOTm));
+			float deno_sqrd = deno * deno;
+			Et = numo / deno_sqrd;
+		}
+		return fabsf(normal.dot(wi)) * (Ed + Er + Et);
 	};
 
 public:
@@ -208,12 +294,14 @@ public:
 		BVMinimize(tree, minimizer);
 		return minimizer.minIntersection;
 	};
+
 //Project 4 include  transmission across the microfacet surface in and through objects
 	Color TraceRay(Ray& ray, std::vector<Shape*>& lights,const KdBVH<float, 3, Shape*>& tree) {
 		Color C = Color(0.0f, 0.0f, 0.0f)  ,  W = Color(1.0f, 1.0f, 1.0f);
 		Vector3f wi, wo = -ray.D;;//  
 		float p;// PDF probability for color to happens
 		float q;// probability that explicit light  could be chossen implicitly
+		float Wmis;
 		Intersection P = FindIntersection(ray,tree);
 		if (!P.s) return C; // no intersection
 		if (P.s->isLight)  return P.s->material->Kd;// is light KD
@@ -224,18 +312,23 @@ public:
 			Intersection L = SampleLight(lights);// Shadow Light
 			p = PdfLight(L) / GeometryFactor(P, L);//Probability for that event to happen
 			q = PdfBrdf(  wo, normal, wi, P.s) * RUSSIAN_ROULETTE;
+			Wmis = p * p / (p * p + q * q);
 			Vector3f wo = -ray.D;
 			wi = L.p - P.p;
 			P.p = P.p + wo * 0.0001f;
 			Ray  I(P.p, wi);//Shadow Ray
 			Intersection inters = FindIntersection(I, tree);
 			if (p > 0 && inters.s && inters.p == P.p) {
-				Color f = EvalScattering(wo, normal, wi, P.s);
-				C += W * f / p * (Color)P.s->material->Kd;
+				Color f = EvalScattering(wo, normal, wi, P.s, P.t);
+				C += W * Wmis * f / p * (Color)P.s->material->Kd;
 			}
 #endif
-			Interaction myInteraction = myrandom(RNGen) < P.s->material->probabilityDiffuse ? DIFFUSE : REFLECTION;
-			wi = SampleBrdf(myInteraction, wo, normal, P.s->material->alpha);// //Extend Path predict where the ray came from
+			float rand = myrandom(RNGen);
+			Interaction myInteraction =
+				rand < P.s->material->probabilityDiffuse ? DIFFUSE : 
+				rand < P.s->material->probabilityDiffuse + P.s->material->probabilityReflection ? REFLECTION : TRANSMISSION;
+
+			wi = SampleBrdf(myInteraction, wo, normal, P.s);// //Extend Path predict where the ray came from
 			P.p += wi * 0.0001f; //fixing position outside shape. 
 			Ray wiRay(P.p , wi); 
 			Intersection Q = FindIntersection(wiRay, tree);
@@ -243,15 +336,17 @@ public:
 				C = Color(0.0f, 0.0f, 0.0f); 
 				break;
 			}
-			//Color f = fabsf(normal.dot(wi)) * (EvalBrdf(myInteraction, normal, wo, wi, P.s));// (p.object_->get_material()->Kd / M_PI);
-			Color f = EvalScattering(wo, normal, wi, P.s);//
+			Color f = EvalScattering(wo, normal, wi, P.s, P.t);//
 			p = PdfBrdf( wo, normal, wi, P.s) * RUSSIAN_ROULETTE; //how possible is that event
+
 			if (p < epsilon) { //if there is not posibility
 				C = Color(0.0f, 0.0f, 0.0f);
 				break; 
 			}
 			W *= f / p;
 			if (Q.s->material->isLight()) {	//Implicit Light Connection
+				q = PdfLight(Q) / GeometryFactor(P, Q);//Probability the implicit light could be chosen explicitly
+				Wmis = 1;// p* p / (p * p + q * q);
 				C += W * (Color)Q.s->material->Kd;
 				break;
 			}
