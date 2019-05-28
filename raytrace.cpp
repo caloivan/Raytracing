@@ -1,6 +1,6 @@
 ﻿int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
 int kdtree = 1;
-int numberOfPasses = 50;  // if passes = 1 then raytracing, else path tracing
+int numberOfPasses = 200;  // if passes = 1 then raytracing, else path tracing
 
 bool Boxes = true;
 bool Cylinders = true;
@@ -128,7 +128,7 @@ class Tracer
 	float PdfBrdf(Interaction & miInteraction, const  Vector3f& wo,  Vector3f& normal, const  Vector3f& wi, Shape* shape) {
 		float  Pd = fabsf(wi.dot(normal)) / PI;
 		Vector3f m = (wo + wi).normalized();
-		float Pr = D(normal, m, shape->material->alpha) * m.dot(normal) / (fabsf(wi.dot(m)));
+		float Pr = D(normal, m, shape->material->alpha) * m.dot(normal) / (4.0f * fabsf(wi.dot(m)));
 
 		return Pd * shape->material->probabilityDiffuse + 
 			   Pr * shape->material->probabilityReflection;
