@@ -1,13 +1,13 @@
 ﻿int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
 int kdtree = 1;
-int numberOfPasses = 50;  // if passes = 1 then raytracing, else path tracing
+int numberOfPasses = 200;  // if passes = 1 then raytracing, else path tracing
 
 bool Boxes = true;
 bool Cylinders = true;
 bool Spheres = true;
 
 bool Project1 = false;
-#define EXPLICIT
+#define EXPLICIT1
 
 typedef enum {
 	DIFFUSE,
@@ -113,57 +113,56 @@ class Tracer
 			return SampleLobe(normal, sqrtf((float)myrandom(RNGen)), 2 * PI * (float)myrandom(RNGen));
 		}
 		else if (interaction == REFLECTION) { 
-			Vector3f m = SampleLobe(normal, pow((float)myrandom(RNGen), 1.0f / (shape->material->alpha + 1.0f)), 2.0f * PI * (float)myrandom(RNGen));
+			Vector3f m = SampleLobe( normal , pow(myrandom(RNGen), 1.0f / (shape->material->alpha + 1.0f)), 2.0f * PI *  myrandom(RNGen) );
 			return  2.0f * wo.dot(m) * m - wo;
 		}
-		else /*if (interaction == TRANSMISSION)*/ { 
-			Vector3f m = SampleLobe(normal, pow(myrandom(RNGen), 1.0f / (shape->material->alpha + 1.0f)), 2 * PI * (myrandom(RNGen	)));
-			float woDOTn = wo.dot(normal);
-			float ior = shape->material->ior;
-			float ni = woDOTn < 0 ? ior : 1.0f;
-			float no = woDOTn < 0 ? 1 : ior;
-			float n = ni / no;
-			float woDOTm = wo.dot(m);
-			float radicand = 1.0f - (n * n) * (1 - (woDOTm * woDOTm));
+		else if (interaction == TRANSMISSION) { 
+			Vector3f m = SampleLobe( normal , pow(myrandom(RNGen), 1.0f / (shape->material->alpha + 1.0f)), 2.0f * PI * myrandom(RNGen) );
+			float woDOTn = wo.dot(normal),
+				ni = woDOTn < 0 ? shape->material->ior : 1.0f,
+				no = woDOTn < 0 ? 1 : shape->material->ior,
+				n = ni / no,
+				woDOTm = wo.dot(m),
+				radicand = 1.0f - n * n * (1 - woDOTm * woDOTm);
+
 			if (radicand < 0)
-				return 	(2.0f * woDOTm * m - wo);
+				return 	2.0f * woDOTm * m - wo;
 			else
-				return  (((n * (woDOTm)) - (woDOTn >= 0 ? 1 : -1) * sqrtf(radicand)) * m) - n * wo;
+				return  (n * woDOTm - woDOTn >= 0 ? 1 : -1 * sqrtf(radicand)) * m - n * wo;
 		}
 	}
 
-	Vector3f  SampleLobe(Vector3f normal, float r1, float r2) {
-		float const s = sqrtf(1 - r1 * r1);
-		Vector3f const k = Vector3f(s * cosf(r2), s * sinf(r2), r1);
-		Quaternionf const q = Quaternionf::FromTwoVectors(Vector3f::UnitZ(), normal);
-		return q._transformVector(k);
-	};
+	Vector3f Tracer::SampleLobe(Vector3f normal, float r1, float r2) {
+		Quaternionf q = Quaternionf::FromTwoVectors(Vector3f::UnitZ(), normal);
+		float s = sqrtf(1 - (r1 * r1));
+		return q._transformVector(Vector3f(s * cosf(r2), s * sinf(r2), r1));
+	}
 
 	float PdfBrdf( const  Vector3f& wo,  Vector3f& normal, const  Vector3f& wi, Shape* shape) {
 		//DIFFUSE
 		float  Pd = fabsf(wi.dot(normal)) / PI;
 		//REFLECTION
 		Vector3f m = (wo + wi).normalized();
-		float Pr = D(normal, m, shape->material->alpha) * m.dot(normal) / (4.0f * fabsf(wi.dot(m)));
+		float Pr = D(normal, m, shape->material->alpha) * fabsf(m.dot(normal)) / (4.0f * fabsf(wi.dot(m)));
 		
 		//TRANSMISSION
-		float Pt = 0;
-		float ior = shape->material->ior;
 		float woDOTn = wo.dot(normal);
-		float ni = woDOTn < 0 ? ior : 1.0f;
-		float no = woDOTn < 0 ? 1 : ior;
+		float woDOTm = wo.dot(m);
+		float ni = woDOTn < 0 ? shape->material->ior : 1.0f;
+		float no = woDOTn < 0 ? 1 : shape->material->ior;
 		float n = ni / no;
 		m = -(wo * ni + wi * no).normalized();
-		float woDOTm = wo.dot(m);
-		float radicand = 1 - (n * n) * (1 - (woDOTm * woDOTm));
+		float radicand = 1 - n * n * (1 - woDOTm * woDOTm);
 
+		float Pt;
 		if (radicand < 0.0f) { //total internal reflection
 			m = (wo + wi).normalized();
-			Pt = D(normal, m, shape->material->alpha) * (fabsf(m.dot(normal))) / (4.0f * fabsf(wi.dot(m)));
+			Pt = D(normal, m, shape->material->alpha) * (fabsf(m.dot(normal))) / 
+				                  (4.0f * fabsf(wi.dot(m)));
 		}
 		else {
-			float deno = (no * (wi.dot(m))) + (ni * (woDOTm));
-			Pt = D(normal, m, shape->material->alpha) * fabsf(m.dot(normal)) * no * no * fabsf(wi.dot(m)) / deno / deno;
+			Pt = D(normal, m, shape->material->alpha) * fabsf(m.dot(normal)) * no * no * fabsf(wi.dot(m)) / 
+				             powf((no * wi.dot(m) + ni * woDOTm), 2.0f);
 		}
 
 		return Pd * shape->material->probabilityDiffuse       + 
@@ -229,62 +228,55 @@ class Tracer
 		
 		//REFLECTION
 		Vector3f m = (wo + wi).normalized();
-		Color Er =  
-			D(normal, m, shape->material->alpha) * 
-			G(wo, normal, wi, m, shape->material->alpha ) * 
-			F(wi.dot(m), shape->material->Ks) /  
-			(4.0f * fabsf(wi.dot(normal)) * fabsf(wo.dot(normal)));
+		Color Er = D(normal, m, shape->material->alpha) * G(wo, normal, wi, m, shape->material->alpha ) * F(wi.dot(m), shape->material->Ks) /  
+			                                  (4.0f * fabsf(wi.dot(normal)) * fabsf(wo.dot(normal)));
 
 		//TRANSMISSION
 		Color Et;
 		float ior = shape->material->ior;
 		float alpha = shape->material->alpha;
-		Vector3f materialKt = shape->material->Kt;
 
-		float n = 0.0f;
-		float ni = 1.0f;
-		float no = ior;
-		float atenX = 1.0f;
-		float atenY = 1.0f;
-		float atenZ = 1.0f;
+		float n = 0.0f, ni = 1.0f, no = ior;
+		float atenX = 1.0f, atenY = 1.0f, atenZ = 1.0f;
 
-		Vector3f attuenation_;
+		Vector3f aten;
 		if (wo.dot(normal) < 0.0f) {
 			ni = ior;
 			no = 1.0f;
-			atenX = powf(2.71f, t * log(materialKt.x()));
-			atenY = powf(2.71f, t * log(materialKt.y()));
-			atenZ = powf(2.71f, t * log(materialKt.z()));
-			attuenation_ = Vector3f(atenX, atenY, atenZ);
+			atenX = powf(2.71f, t * log(shape->material->Kt.x()));
+			atenY = powf(2.71f, t * log(shape->material->Kt.y()));
+			atenZ = powf(2.71f, t * log(shape->material->Kt.z()));
+			aten = Vector3f(atenX, atenY, atenZ);
 		}
 		else {
-			attuenation_ = Vector3f(atenX, atenY, atenZ);
+			aten = Vector3f(atenX, atenY, atenZ);
 		}
 		n = ni / no;
 
-		m = -(wo * ni + wi * no).normalized();
+		m = -(no * wi + ni * wo).normalized();
 		float woDOTm = wo.dot(m);
 		float woDOTn = fabsf(wo.dot(normal));
 		float wiDOTn = fabsf(wi.dot(normal));
 		float wiDOTm = wi.dot(m);
 
-		float radicand = 1 - (n * n) * (1 - (woDOTm * woDOTm));
+		float radicand = 1.0f - n * n * (1 - woDOTm * woDOTm);
 		if (radicand < 0) {
-			float denom = 1.0f / (4.0f * woDOTn * wiDOTn);
-			Et =  (Color)attuenation_* (F(wiDOTm, shape->material->Ks) * D(normal, m, alpha) * G(wo, wi, m, normal, alpha) * denom);
+			Et = (Color)aten * F(wiDOTm, shape->material->Ks) * D(normal, m, alpha) * G(wo, wi, m, normal, alpha) /
+				                               (4.0f * woDOTn * wiDOTn);
 		}
 		else {
-			float denom = 1.0f / (woDOTn * wiDOTn);
-			float abs_wi_dot_m = fabsf(wiDOTm);
-			float abs_wo_dot_m = fabsf(woDOTm);
-			float no_sqrd = no * no;
-			float numo = abs_wi_dot_m * abs_wo_dot_m * no_sqrd;
-			float deno = (no * (wiDOTm)) + (ni * (woDOTm));
-			float deno_sqrd = deno * deno;
-			Et = numo / deno_sqrd;
+			float f1 = fabsf(wiDOTm) * fabsf(wiDOTm) * no * no /
+				powf((no * wiDOTm) + (ni * woDOTm), 2.0f);
+
+			Color  c1 = (Vector3f(1,1,1) = F(wiDOTm, shape->material->Ks)) * D(normal, m, alpha) * G(wo, wi, m, normal, alpha) /
+				(4.0f * woDOTn * wiDOTn);
+
+			Et = (Color)aten * c1 * f1;
 		}
+		//SUM OF ALL
 		return fabsf(normal.dot(wi)) * (Ed + Er + Et);
 	};
+
 
 public:
 	Tracer() {};
@@ -300,7 +292,7 @@ public:
 		Color C = Color(0.0f, 0.0f, 0.0f)  ,  W = Color(1.0f, 1.0f, 1.0f);
 		Vector3f wi, wo = -ray.D;;//  
 		float p;// PDF probability for color to happens
-		float q;// probability that explicit light  could be chossen implicitly
+		float q;// probability that explicit light could be chossen implicitly
 		float Wmis;
 		Intersection P = FindIntersection(ray,tree);
 		if (!P.s) return C; // no intersection
@@ -313,44 +305,71 @@ public:
 			p = PdfLight(L) / GeometryFactor(P, L);//Probability for that event to happen
 			q = PdfBrdf(  wo, normal, wi, P.s) * RUSSIAN_ROULETTE;
 			Wmis = p * p / (p * p + q * q);
-			Vector3f wo = -ray.D;
-			wi = L.p - P.p;
-			P.p = P.p + wo * 0.0001f;
-			Ray  I(P.p, wi);//Shadow Ray
+			wi = (L.p - P.p).normalized();
+			Ray  I(P.p - wo * 0.0001f, wi);//Shadow Ray
 			Intersection inters = FindIntersection(I, tree);
-			if (p > 0 && inters.s && inters.p == P.p) {
+			
+			if (p > 0 && inters.s && inters.p == L.p) {
 				Color f = EvalScattering(wo, normal, wi, P.s, P.t);
-				C += W * Wmis * f / p * (Color)P.s->material->Kd;
+				C += W * (f / p)  * Wmis *  (Color)P.s->material->Kd;
 			}
 #endif
+			//float rand = myrandom(RNGen);
+			//Interaction myInteraction =
+			//	rand < P.s->material->probabilityDiffuse ? DIFFUSE : 
+			//	rand < P.s->material->probabilityDiffuse + P.s->material->probabilityReflection ? REFLECTION : 
+			//	TRANSMISSION;
+
+			//wi = SampleBrdf(myInteraction, wo, normal, P.s);// //Extend Path predict where the ray came from
+			//Ray wiRay(P.p + wi * 0.0001f, wi);//fixing position outside shape.
+			//Intersection Q = FindIntersection(wiRay, tree);
+			//if (!Q.s) {
+			//	//C = Color(0.0f, 0.0f, 0.0f); 
+			//	break;
+			//}
+			//Color f = EvalScattering(wo, normal, wi, P.s, P.t);//
+			//p = PdfBrdf( wo, normal, wi, P.s) * RUSSIAN_ROULETTE; //how possible is that event
+
+			//if (p < epsilon) { //if there is not posibility
+			////	C = Color(0.0f, 0.0f, 0.0f);
+			//	break; 
+			//}
+			//W *= f / p;
+			//if (Q.s->material->isLight()) {	//Implicit Light Connection
+			//	q = PdfLight(Q) / GeometryFactor(P, Q);//Probability the implicit light could be chosen explicitly
+			//	Wmis = 1;// p* p / (p * p + q * q);
+			//	C += W * (Color)Q.s->material->Kd;
+			//	break;
+			//}
+			//P.Set(Q); //Prepare next possible ray rebound
+			//wo = -wi;
+
+
 			float rand = myrandom(RNGen);
-			Interaction myInteraction =
-				rand < P.s->material->probabilityDiffuse ? DIFFUSE : 
+			Interaction choice =
+				rand < P.s->material->probabilityDiffuse ? DIFFUSE :
 				rand < P.s->material->probabilityDiffuse + P.s->material->probabilityReflection ? REFLECTION : TRANSMISSION;
 
-			wi = SampleBrdf(myInteraction, wo, normal, P.s);// //Extend Path predict where the ray came from
-			P.p += wi * 0.0001f; //fixing position outside shape. 
-			Ray wiRay(P.p , wi); 
-			Intersection Q = FindIntersection(wiRay, tree);
-			if (!Q.s) {
-				C = Color(0.0f, 0.0f, 0.0f); 
-				break;
-			}
-			Color f = EvalScattering(wo, normal, wi, P.s, P.t);//
-			p = PdfBrdf( wo, normal, wi, P.s) * RUSSIAN_ROULETTE; //how possible is that event
+			wi = SampleBrdf(choice, normal, wo, P.s);// calculates rebound, based on diffuse, reflection, refraction
+			Ray new_ray((P.p + wi * 0.01f), wi);
+			Minimizer min1(new_ray);
+			BVMinimize(tree, min1);
+			Intersection Q = min1.minIntersection;
+			if (!Q.s)   break;
 
-			if (p < epsilon) { //if there is not posibility
-				C = Color(0.0f, 0.0f, 0.0f);
-				break; 
-			}
+			Color f = EvalScattering( wo, normal, wi, P.s, P.t);
+			p = PdfBrdf( wo, normal, wi, P.s) * RUSSIAN_ROULETTE;
+			if (p < epsilon)   break;
 			W *= f / p;
-			if (Q.s->material->isLight()) {	//Implicit Light Connection
+
+			//IMPLICIT LIGHT CONNECTION
+			if (Q.s->material->isLight()) {
 				q = PdfLight(Q) / GeometryFactor(P, Q);//Probability the implicit light could be chosen explicitly
-				Wmis = 1;// p* p / (p * p + q * q);
-				C += W * (Color)Q.s->material->Kd;
+				Wmis =  p* p / (p * p + q * q);
+				C += W * Wmis * (Color)Q.s->material->Kd;
 				break;
 			}
-			P.Set(Q); //Prepare next possible ray rebound
+			P.Set(Q);
 			wo = -wi;
 		}
 		return C;

@@ -19,14 +19,14 @@ class Material
     float alpha, ior, probabilityDiffuse, probabilityReflection, probabilityTransmission;
 	
     virtual bool isLight() { return false; }
-    Material()  : Kd(Vector3f(1.0, 0.5, 0.0)), Ks(Vector3f(1,1,1)), alpha(1.0) { CalculateProbablities(); }
+    Material()  : Kd(Vector3f(1.0, 0.5, 0.0)), Ks(Vector3f(1,1,1)), alpha(1.0f) { CalculateProbablities(); }
     Material(const Vector3f d, const Vector3f s, const float a) : Kd(d), Ks(s), alpha(a) { CalculateProbablities(); }
     Material(Material& o) { Kd=o.Kd;  Ks=o.Ks;  alpha=o.alpha; CalculateProbablities();}
-	Material(const Vector3f _Kd, const Vector3f s, const float a, const Vector3f t, const float _ior) : Kd(_Kd), Ks(s), alpha(a),  Kt(t), ior(_ior) { CalculateProbablities(); }
+	Material(const Vector3f _Kd, const Vector3f _ks, const float _alpha, const Vector3f _kt, const float _ior) : Kd(_Kd), Ks(_ks), alpha(_alpha),  Kt(_kt), ior(_ior) { CalculateProbablities(); }
 
     void setTexture(const std::string path);
 	void CalculateProbablities() {
-		totalProbability = Kd.norm() + Ks.norm();
+		totalProbability = Kd.norm() + Ks.norm() + Kt.norm();
 		probabilityDiffuse = Kd.norm() / totalProbability;
 		probabilityReflection = Ks.norm() / totalProbability;
 		probabilityTransmission = Kt.norm() / totalProbability;
