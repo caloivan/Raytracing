@@ -24,7 +24,6 @@ class Material
     Material(Material& o) { Kd=o.Kd;  Ks=o.Ks;  alpha=o.alpha; CalculateProbablities();}
 	Material(const Vector3f _Kd, const Vector3f _ks, const float _alpha, const Vector3f _kt, const float _ior) : Kd(_Kd), Ks(_ks), alpha(_alpha),  Kt(_kt), ior(_ior) { CalculateProbablities(); }
 
-    void setTexture(const std::string path);
 	void CalculateProbablities() {
 		totalProbability = Kd.norm() + Ks.norm() + Kt.norm();
 		probabilityDiffuse = Kd.norm() / totalProbability;
@@ -100,7 +99,7 @@ public:
 
     // The main program will call the TraceImage method to generate
     // and return the image.  This is the Ray Tracer!
-    void TraceImage(Color* image, const int pass);
+	void TraceImage(Color* image,  const int pass);
 
 	Color ReturnColor(Intersection i, int option);
 };
