@@ -1,7 +1,6 @@
 ﻿int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
 int kdtree = 1;
 int numberOfPasses = 50;  // if passes = 1 then raytracing, else path tracing
-
 bool Boxes = true;
 bool Cylinders = true;
 bool Spheres = true;
@@ -12,13 +11,9 @@ bool Project1 = false;
 typedef enum {
 	DIFFUSE,
 	REFLECTION,
-	TRANSMISSION,
-	ALL
+	TRANSMISSION
 }Interaction;
 
-//////////////////////////////////////////////////////////////////////
-// Provides the framework for a raytracer.
-////////////////////////////////////////////////////////////////////////
 #include <vector>
 #include <windows.h>
 #include <cstdlib>
@@ -32,8 +27,7 @@ typedef enum {
 #include <random>
 #include <chrono>// measure time
 std::mt19937_64 RNGen,RNGen2;// A good quality *thread-safe* Mersenne Twister random number generator.
-std::uniform_real_distribution<> myrandom(0 , 1.0f);
-// Call myrandom(RNGen) to get a uniformly distributed random number in [0,1].
+std::uniform_real_distribution<> myrandom(0 , 1.0f);// Call myrandom(RNGen) to get a uniformly distributed random number in [0,1].
 ///************************** KDTREE SECTION ***************************************///
 //These includes are  written on geom.h
 //#include <Eigen/StdVector> // For vectors, matrices (2d,3d,4d) and quaternions in f and d precision.
@@ -97,7 +91,6 @@ Bbox bounding_box(Shape* shape) { return shape->returnBbox(); }
 
 class Tracer
 {
-
 	Intersection FindIntersection(const Ray& ray, const KdBVH<float, 3, Shape*>& tree ) {
 		Minimizer minimizer(ray);
 		BVMinimize(tree, minimizer);
@@ -105,34 +98,30 @@ class Tracer
 	};
 
 public: 
-Color TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Shape*>& tree_) {
+Color Tracer::TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Shape*>& tree) {
 	Color C = Color(0.0f, 0.0f, 0.0f);//cOLOR
 	Color W = Color(1.0f, 1.0f, 1.0f);// WEIGHT PONDERATOR
 	float p, q, Wmis;
 	bool objectMoved = false; //reference to move 1 object
 	Vector3f offset = Vector3f(0, 0, 0);
 	Vector3f initialPosition = Vector3f(0, 0, 0);
-
 	//INITIAL RAY
-	Intersection P = FindIntersection(ray, tree_);
+	Intersection P = FindIntersection(ray, tree);
 	if (!P.s) return C; // no intersection
 	if (P.s->isLight)  return P.s->material->Kd;// is light KD
-
 	Vector3f wi, wo = -ray.D;
 	while (myrandom(RNGen) <= RUSSIAN_ROULETTE) {
 		Vector3f normal = P.n.normalized();
 #ifdef EXPLICIT
 		Intersection L = SampleLight(lights);// Randomly choose a light 
 		p = PdfLight(L) / GeometryFactor(P, L);//  Probability to hit light ( angular measure )
-		q = PdfBrdf(ALL, normal, wo, wi, P.s) * RUSSIAN_ROULETTE;//probability of diffuse + reflection + refraction
-		Wmis = p * p / (p * p + q * q);
+		q = PdfBrdf( wo, normal, wi, P.s) * RUSSIAN_ROULETTE;//probability of diffuse + reflection + refraction
+		Wmis =  p * p / (p * p + q * q);
 		wi = (L.p - P.p).normalized();
 		Ray shadowRay((P.p - wo * 0.01f), wi);//Ray goes explicit to light
-		Minimizer min1(shadowRay);
-		Intersection * I = BVMinimize(tree_, min1) == FLT_MAX ? NULL : &min1.minIntersection;//Shadow ray Intersection
-
-		if (p > 0 && I && I->p == L.p) {
-			Color f = EvalScattering( normal, wo, wi, P.s, P.t);
+		Intersection inters = FindIntersection(shadowRay, tree);
+		if (p > 0 && inters.s && inters.p == L.p) {
+			Color f = EvalScattering(  wo, normal, wi, P.s, P.t);
 			C += W * (f / p) * Wmis * (Color)L.s->material->Kd;
 		}
 #endif
@@ -140,24 +129,20 @@ Color TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Shape*>& t
 		Interaction choice =
 			rand < P.s->material->probabilityDiffuse ? DIFFUSE :
 			rand < P.s->material->probabilityDiffuse + P.s->material->probabilityReflection ? REFLECTION : TRANSMISSION;
-
 		wi = SampleBrdf(choice, normal, wo, P.s);// calculates rebound, based on diffuse, reflection, refraction
-		Ray new_ray((P.p + wi * 0.01f), wi);
-		Minimizer min2(new_ray);
-		BVMinimize(tree_, min2);
-		Intersection Q = min2.minIntersection;
+		Ray wiRay((P.p + wi * 0.0001f), wi);
+		Intersection Q = FindIntersection(wiRay, tree);
 		if (!Q.s)   break;
 
-		Color f = EvalScattering( normal, wo, wi, P.s, P.t);
-		p = PdfBrdf(ALL, normal, wo, wi, P.s) * RUSSIAN_ROULETTE;
+		Color f = EvalScattering( wo, normal, wi, P.s, P.t);
+		p = PdfBrdf( wo, normal, wi, P.s) * RUSSIAN_ROULETTE;
 		if (p < epsilon)   break;
-
 		W *= f / p;
 
 		//IMPLICIT LIGHT CONNECTION
 		if (Q.s->material->isLight()) {
 			q = PdfLight(Q) / GeometryFactor(P, Q);//Probability the implicit light could be chosen explicitly
-			Wmis =  p * p / (p * p + q * q);
+			Wmis = 1;// p * p / (p * p + q * q);
 			C += W * Wmis * (Color)Q.s->material->Kd;
 			break;
 		}
@@ -167,52 +152,43 @@ Color TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Shape*>& t
 	return  C;
 }
 
-	Color EvalScattering(const Vector3f& normal, const Vector3f& wo,const Vector3f& wi, Shape* shape, float& t)
-	{
-		Color Ed, Er, Et;
+Color Tracer::EvalScattering( Vector3f & wo, Vector3f& normal, Vector3f & wi, Shape * shape, float& t) {
+	    Vector3f Kd = shape->material->Kd;
+	    Vector3f Ks = shape->material->Ks;
+		Vector3f Kt = shape->material->Kt;
 		float alpha = shape->material->alpha;
-		//DIFUSE
-		Ed = shape->material->Kd / PI;
-		
-		//REFLECTION
-		Vector3f m = (wo + wi).normalized();
-		Er = F(wi.dot(m), shape->material->Ks) * D(normal, m, shape->material->alpha) * G(wo, normal, wi, m, shape->material->alpha) /
-												(4.0f * fabsf(wo.dot(normal)) * fabsf(wi.dot(normal)));
-		//TRANSMISSION
-		Color Kt = shape->material->Kt;
 		float ior = shape->material->ior;
-		float ni = wo.dot(normal) < 0.0f ? ior : 1,
-			  no = wo.dot(normal) < 0.0f ? 1 : ior,
-			  n = ni / no;
+		Color ColorDiffuse = (Color)Kd / PI;
+		
+		float woDOTn = fabsf(wo.dot(normal));
+		float wiDOTn = fabsf(wi.dot(normal));
+		Vector3f m = (wo + wi).normalized();
+		float wiDOTm = wi.dot(m);
+		Color ColorReflection = F(wiDOTm, Ks) * D(normal, m, alpha) * G(wo, normal, wi, m,  alpha) / 
+											 (4.0f * woDOTn * wiDOTn);
 
-		Vector3f atenuation = wo.dot(normal) < 0.0f ? 
-				Vector3f(powf(2.71f, t * log(Kt.x())), powf(2.71f, t * log(Kt.y())), powf(2.71f, t * log(Kt.z()))):
-				Vector3f(1, 1, 1);
-		
-		m = -(no * wi + ni * wo).normalized();
-		float	woDOTm = wo.dot(m),  
-				woDOTn = fabsf(wo.dot(normal)),  
-				wiDOTn = fabsf(wi.dot(normal)), 
-				wiDOTm = wi.dot(m);
-		
-		float radicand = 1.0f - n * n * (1 - woDOTm * woDOTm);
-		
-		if (radicand < 0) {
-			Et = (Color)atenuation * F(wiDOTm, shape->material->Ks) * D(normal, m, alpha) * G(wo, normal, wi, m,  alpha) /
-				                               (4.0f * woDOTn * wiDOTn);
+		float ni = wo.dot(normal) < 0.0f?ior: 1.0f;
+		float no = wo.dot(normal) < 0.0f?1.0f:ior;
+		float n = ni / no;
+		Vector3f attuenation_ = wo.dot(normal) < 0.0f ?// BEERS LAW FOR ATENUATION
+			Vector3f(powf(2.71f, t * log(Kt.x())), powf(2.71f, t * log(Kt.y())), powf(2.71f, t * log(Kt.z()))):
+			Vector3f(1, 1, 1);
+		 m = -(wo * ni + wi * no).normalized();
+		float woDOTm = wo.dot(m);
+		 wiDOTm = wi.dot(m);
+		Color ColorTransmission;
+		float radicand = 1 - (n * n) * (1 - (woDOTm * woDOTm));
+		if (radicand < 0) {//INTERNAL REFLECTION
+			ColorTransmission = F(wiDOTm, Ks) * D(normal, m, alpha) * G(wo, normal, wi, m, alpha)  / 
+											 	(4.0f * woDOTn * wiDOTn);
 		}
 		else {
-			float f1 = fabsf(wiDOTm) * fabsf(wiDOTm) * no * no /
-				       powf(no * wiDOTm + ni * woDOTm, 2.0f);
-			
-			Color  c1 = (Color(1,1,1) - F(wiDOTm, shape->material->Ks)) * D(normal, m, alpha) * G(wo, normal, wi, m, alpha) /
-				                               (woDOTn * wiDOTn);
-			Et =  (Color)atenuation * c1 * f1;
+			ColorTransmission = fabsf(wiDOTm) * fabsf(woDOTm) * no * no      *      (Color(1, 1, 1) - F(wiDOTm, Ks)) * D(normal, m, alpha) * G(wo, normal, wi, m, alpha) /
+				                  (powf(no * wiDOTm + ni * woDOTm, 2)        *	        woDOTn * wiDOTn);
 		}
-
-		//SUM OF ALL
-		return fabsf(normal.dot(wi)) * (Ed + Er + Et);
-	};
+		ColorTransmission *= (Color)attuenation_;
+	return fabsf(normal.dot(wi)) * (ColorDiffuse + ColorReflection + ColorTransmission);
+}
 
 //Returns the Wi. acording to normal. wo and  surface specig
 Vector3f  Tracer::SampleBrdf(const Interaction& choice, Vector3f& normal, Vector3f& wo, Shape* shape) {
@@ -223,21 +199,18 @@ Vector3f  Tracer::SampleBrdf(const Interaction& choice, Vector3f& normal, Vector
 	}
 	else if (choice == REFLECTION) {
 		Vector3f m = SampleLobe(normal, pow(myrandom(RNGen), 1.0f / (alpha + 1.0f)), 2 * PI * (myrandom(RNGen)));
-		wi = 2.0f * (wo.dot(m)) * m - wo;
+		wi = 2.0f * wo.dot(m) * m - wo;
 	}
 	else if (choice == TRANSMISSION) {
 		Vector3f m = SampleLobe(normal, pow(myrandom(RNGen), 1.0f / (alpha + 1.0f)), 2 * PI * (myrandom(RNGen)));
 		float woDOTn = wo.dot(normal);
-		float ior = shape->material->ior;
-		float ni = woDOTn < 0 ? ior : 1.0f;
-		float no = woDOTn < 0 ? 1 : ior;
-		float n = ni / no;
+		float n =  woDOTn < 0 ? shape->material->ior :1/ shape->material->ior;
 		float woDOTm = wo.dot(m);
 		float radicand = 1.0f - (n * n) * (1 - (woDOTm * woDOTm));
 		if (radicand < 0)
 			wi = 2.0f * woDOTm * m - wo;
 		else
-			wi = (((n * (woDOTm)) - (woDOTn >= 0 ? 1 : -1) * sqrtf(radicand)) * m) - n * wo;
+			wi = (n * woDOTm - (woDOTn >= 0 ? 1 : -1) * sqrtf(radicand)) * m - n * wo;
 	}
 	return wi.normalized();
 }
@@ -248,49 +221,41 @@ Vector3f Tracer::SampleLobe(Vector3f normal, float r1, float r2) {
 	return q._transformVector(Vector3f(s * cosf(r2), s * sinf(r2), r1));
 }
 
-float Tracer::PdfBrdf(const Interaction& choice, Vector3f & normal, Vector3f & wo, Vector3f & wi, Shape * shape) {
+float Tracer::PdfBrdf(  Vector3f & wo, Vector3f & normal, Vector3f & wi, Shape * shape) {
 	float alpha = shape->material->alpha;
 	float pd = shape->material->probabilityDiffuse;
 	float pr = shape->material->probabilityReflection;
 	float pt = shape->material->probabilityTransmission;
-	if (choice == DIFFUSE) {
-		return pd * (fabsf(wi.dot(normal)) / PI);
-	}
-	else if (choice == REFLECTION) {
-		Vector3f m = (wo + wi).normalized();
-		return  pr * D(normal, m, alpha) * (fabsf(m.dot(normal))) / (4.0f * fabsf(wi.dot(m)));
-	}
-	else if (choice == TRANSMISSION) {
-		float ior = shape->material->ior;
-		float woDOTn = wo.dot(normal);
-		float ni = woDOTn < 0 ? ior : 1.0f;
-		float no = woDOTn < 0 ? 1 : ior;
-		float n = ni / no;
-		Vector3f m = -(wo * ni + wi * no).normalized();
-		float woDOTm = wo.dot(m);
-		float radicand = 1 - (n * n) * (1 - (woDOTm * woDOTm));
+	float Pd, Pt, Pr;
+	Pd = fabsf(wi.dot(normal)) / PI;
+	Vector3f m = (wo + wi).normalized();
+	Pr =  D(normal, m, alpha) * (fabsf(m.dot(normal))) / (4.0f * fabsf(wi.dot(m)));
+	
+	float ior = shape->material->ior;
+	float woDOTn = wo.dot(normal);
+	float ni = woDOTn < 0 ? ior : 1.0f;
+	float no = woDOTn < 0 ? 1 : ior;
+	float n =  ni / no;
+	m = -(wo * ni + wi * no).normalized();
+	float woDOTm = wo.dot(m);
+	float radicand = 1 - (n * n) * (1 - (woDOTm * woDOTm));
 
-		if (radicand < 0.0f) { //total internal reflection
-			m = (wo + wi).normalized();
-			return  pt * D(normal, m, alpha) * (fabsf(m.dot(normal))) / (4.0f * fabsf(wi.dot(m)));
-		}
-		else {
-			float deno = (no * (wi.dot(m))) + (ni * (woDOTm));
-			return (pt * D(normal, m, alpha) * fabsf(m.dot(normal)) * no * no * fabsf(wi.dot(m)) / deno / deno);
-		}
-	}
-	else {
-		return PdfBrdf(DIFFUSE, normal, wo, wi, shape) + PdfBrdf(REFLECTION, normal, wo, wi, shape) + PdfBrdf(TRANSMISSION, normal, wo, wi, shape);
-	}
+	m = radicand < 0.0f?(wo + wi).normalized() : m;
+	float deno = radicand < 0.0f ? 1:(no * (wi.dot(m))) + (ni * (woDOTm));
+
+	Pt = radicand < 0.0f? //total internal reflection
+			D(normal, m, alpha) * fabsf(m.dot(normal)) / 
+				(4.0f * fabsf(wi.dot(m))):
+
+		    D(normal, m, alpha) * fabsf(m.dot(normal)) * no * no * fabsf(wi.dot(m))  /
+				( deno * deno);
+	return pd * Pd + pr * Pr + pt * Pt;
 }
 
 float Tracer::GeometryFactor(Intersection & A, Intersection & B) {
-	Vector3f d = A.p - B.p;
-	float a_normal_dot_d = A.n.dot(d);
-	float b_normal_dot_d = B.n.dot(d);
-	float d_normal_dot_d = d.dot(d);
-	float d_dot_sqr = d_normal_dot_d * d_normal_dot_d;
-	return fabsf((a_normal_dot_d * b_normal_dot_d) / d_dot_sqr);
+	const Vector3f  D = A.p - B.p;
+			return fabsf(A.n.dot(D) * B.n.dot(D) / 
+				        powf(D.dot(D), 2));
 }
 
 Intersection Tracer::SampleLight(std::vector<Shape*> & lights) {
@@ -310,38 +275,40 @@ Intersection Tracer::SampleSphere(Sphere * sph) {
 }
 
 float Tracer::PdfLight(Intersection & result) {
-	return (1.0f / result.s->get_area());
+	return       1.0f / 
+		    result.s->get_area();
 }
 
-Color F(const float& wiDOTm, const Color& Ks)//phong Fresnel
-{
-	return Ks + (Color(1, 1, 1) - Ks) * (pow(1 - fabs(wiDOTm), 5));
+Color Tracer::F(const float& wiDOTm, Vector3f Ks){// Shape* shp) {//TODO since  when wiDOTm equal to LDOTH
+	return Ks + (Vector3f(1, 1, 1) - Ks) * pow(1 - fabs(wiDOTm), 5);
 }
 
-float Tracer::D(const Vector3f & normal, const Vector3f & m, float& alpha) {
+float Tracer::D(Vector3f & normal, Vector3f & m, float& alpha) {
 	return ((m.dot(normal)) > 0 ? 1 : 0) * ((alpha + 2.0f) / (2.0f * PI)) * pow((m.dot(normal)), alpha);
 }
 
-float Tracer::G(const Vector3f & wo, const  Vector3f& normal, const  Vector3f & wi, const  Vector3f & m, const  float& alpha) {
+float Tracer::G(Vector3f & wo, Vector3f& normal, Vector3f & wi, Vector3f & m,  float& alpha) {
 	return G1(wi, m, normal, alpha)* G1(wo, m, normal, alpha);
 }
 
+float Tracer::G1(Vector3f & v, Vector3f & m, Vector3f & normal, float& alpha) {
+	float vDOTn = v.dot(normal);
+	if (vDOTn > 1.0f)   return 1.0f;
 
-float G1(const Vector3f & v, const  Vector3f & m, const  Vector3f & N, const  float& alpha) {
-	float const vDOTn = v.dot(N);
-	if (vDOTn > 1.0f)  return 1.0f;
-	float const tanTheta = sqrtf(1.0f - (vDOTn * vDOTn)) / vDOTn;
-	if (tanTheta == 0.0f) return 1.0f;
-	float const a = sqrtf(((alpha / 2.0f) + 1.0f)) / fabsf(tanTheta);
-	return a < 1.6f?
-		v.dot(m) / vDOTn > 0.0f ? (3.535f * a + 2.181f * a * a) / (1.0f + 2.276f * a + 2.577f * a * a) : 0.0f:
-		v.dot(m) / vDOTn > 0.0f ? 1.0f : 0.0f;
+	float tanTheta = sqrtf(1.0f - (vDOTn * vDOTn)) / vDOTn;
+	if (tanTheta == 0.0f)   return 1.0f;
+
+	float a = sqrtf((alpha / 2.0f) + 1.0f) / fabs(tanTheta);
+
+	if (a < 1.6f)
+		return ((v.dot(m) / vDOTn) > 0 ? 1.0f : 0) * (3.535f * a + 2.181f * a * a) / (1.0f + 2.276f * a + 2.577f * a * a);
+	else
+		return ((v.dot(m) / vDOTn) > 0 ? 1.0f : 0);
 }
-};//Tracer?
+};//Tracer Class
 
 Scene::Scene() { }
 void Scene::Finit(){}
-
 void Scene::triangleMesh(MeshData* mesh)
 {
 	for (TriData& tri : mesh->triangles) {
