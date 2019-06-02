@@ -83,7 +83,6 @@ public:
 	std::vector<Shape*> lights;
     Scene();
 	~Scene();
-    void Finit();
 
     // The scene reader-parser will call the Command method with the
     // contents of each line in the scene file.
@@ -375,8 +374,10 @@ public:
 			(tIntersection == tHigh[2]) ? -Vector3f::UnitZ() :// from down cylinder
 			Vector3f(intersectionPoint[0], intersectionPoint[1], 0);//from side of the cylinder
 		normal = normal.normalized();
+		// normal = q.inverse.toRotationMatrix(normal); what next instruction does
 		normal = q.conjugate()._transformVector(normal);// final normal of intersection. into world coordinates
 
+		//Creating an Interception
 		Vector3f InterceptionPoint = ray2.eval(tIntersection);
 		_inter.Set(tIntersection, this, InterceptionPoint, normal);
 

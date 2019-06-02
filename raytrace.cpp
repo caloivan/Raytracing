@@ -1,9 +1,7 @@
 ﻿int optionDraw = 4; //1 deep 2 normal 3 material  4 KD
 int kdtree = 1;
 int numberOfPasses = 50;  // if passes = 1 then raytracing, else path tracing
-bool Boxes = true;
-bool Cylinders = true;
-bool Spheres = true;
+bool Boxes = true,  Cylinders = true, Spheres = true;
 
 bool Project1 = false;
 #define EXPLICIT
@@ -91,14 +89,29 @@ Bbox bounding_box(Shape* shape) { return shape->returnBbox(); }
 
 class Tracer
 {
-	Intersection FindIntersection(const Ray& ray, const KdBVH<float, 3, Shape*>& tree ) {
-		Minimizer minimizer(ray);
-		BVMinimize(tree, minimizer);
-		return minimizer.minIntersection;
-	};
+	Intersection FindIntersection(const Ray& ray, const KdBVH<float, 3, Shape*>& tree, Scene* scene) {
+		if (kdtree) {
+			Minimizer minimizer(ray);
+			BVMinimize(tree, minimizer);
+			return minimizer.minIntersection;
+		}
+		else {
+			float minTime = INFINITY;//
+			Intersection intersection, minIntersection;
+			for (unsigned int i = 0; i < scene->shapes.size(); ++i) {
+				if (scene->shapes[i]->Intersect(ray, intersection)) {
+					if (intersection.t < minTime) {// compare 
+						minTime = intersection.t;
+						minIntersection = intersection;
+					}//if
+				}//if
+			}//for
+			return minIntersection;
+		};//else
+	}
 
 public: 
-Color Tracer::TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Shape*>& tree) {
+Color Tracer::TraceRay(Ray& ray, KdBVH<float, 3, Shape*>& tree, Scene * scene) {
 	Color C = Color(0.0f, 0.0f, 0.0f);//cOLOR
 	Color W = Color(1.0f, 1.0f, 1.0f);// WEIGHT PONDERATOR
 	float p, q, Wmis;
@@ -106,20 +119,21 @@ Color Tracer::TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Sh
 	Vector3f offset = Vector3f(0, 0, 0);
 	Vector3f initialPosition = Vector3f(0, 0, 0);
 	//INITIAL RAY
-	Intersection P = FindIntersection(ray, tree);
+	Intersection P = FindIntersection(ray, tree,scene);
 	if (!P.s) return C; // no intersection
 	if (P.s->isLight)  return P.s->material->Kd;// is light KD
 	Vector3f wi, wo = -ray.D;
 	while (myrandom(RNGen) <= RUSSIAN_ROULETTE) {
 		Vector3f normal = P.n.normalized();
 #ifdef EXPLICIT
-		Intersection L = SampleLight(lights);// Randomly choose a light 
+		Intersection L = SampleLight(scene->lights);// Randomly choose a light 
 		p = PdfLight(L) / GeometryFactor(P, L);//  Probability to hit light ( angular measure )
 		q = PdfBrdf( wo, normal, wi, P.s) * RUSSIAN_ROULETTE;//probability of diffuse + reflection + refraction
-		Wmis =  p * p / (p * p + q * q);
+		Wmis =      p * p / 
+			   (p * p + q * q);
 		wi = (L.p - P.p).normalized();
-		Ray shadowRay((P.p - wo * 0.01f), wi);//Ray goes explicit to light
-		Intersection inters = FindIntersection(shadowRay, tree);
+		Ray shadowRay((P.p - wo * epsilon), wi);//Ray goes explicit to light
+		Intersection inters = FindIntersection(shadowRay, tree, scene);
 		if (p > 0 && inters.s && inters.p == L.p) {
 			Color f = EvalScattering(  wo, normal, wi, P.s, P.t);
 			C += W * (f / p) * Wmis * (Color)L.s->material->Kd;
@@ -127,18 +141,18 @@ Color Tracer::TraceRay(Ray& ray, std::vector<Shape*>& lights, KdBVH<float, 3, Sh
 #endif
 		float rand = myrandom(RNGen);
 		Interaction choice =
-			rand < P.s->material->probabilityDiffuse ? DIFFUSE :
-			rand < P.s->material->probabilityDiffuse + P.s->material->probabilityReflection ? REFLECTION : TRANSMISSION;
+			rand < P.s->material->probabilityDiffuse ?											DIFFUSE :
+			rand < P.s->material->probabilityDiffuse + P.s->material->probabilityReflection ?	REFLECTION :
+																								TRANSMISSION;
 		wi = SampleBrdf(choice, normal, wo, P.s);// calculates rebound, based on diffuse, reflection, refraction
-		Ray wiRay((P.p + wi * 0.0001f), wi);
-		Intersection Q = FindIntersection(wiRay, tree);
+		Ray wiRay((P.p + wi * epsilon), wi);
+		Intersection Q = FindIntersection(wiRay, tree, scene);
 		if (!Q.s)   break;
 
 		Color f = EvalScattering( wo, normal, wi, P.s, P.t);
 		p = PdfBrdf( wo, normal, wi, P.s) * RUSSIAN_ROULETTE;
 		if (p < epsilon)   break;
 		W *= f / p;
-
 		//IMPLICIT LIGHT CONNECTION
 		if (Q.s->material->isLight()) {
 			q = PdfLight(Q) / GeometryFactor(P, Q);//Probability the implicit light could be chosen explicitly
@@ -189,7 +203,6 @@ Color Tracer::EvalScattering( Vector3f & wo, Vector3f& normal, Vector3f & wi, Sh
 		ColorTransmission *= (Color)attuenation_;
 	return fabsf(normal.dot(wi)) * (ColorDiffuse + ColorReflection + ColorTransmission);
 }
-
 //Returns the Wi. acording to normal. wo and  surface specig
 Vector3f  Tracer::SampleBrdf(const Interaction& choice, Vector3f& normal, Vector3f& wo, Shape* shape) {
 	Vector3f wi;
@@ -239,10 +252,8 @@ float Tracer::PdfBrdf(  Vector3f & wo, Vector3f & normal, Vector3f & wi, Shape *
 	m = -(wo * ni + wi * no).normalized();
 	float woDOTm = wo.dot(m);
 	float radicand = 1 - (n * n) * (1 - (woDOTm * woDOTm));
-
 	m = radicand < 0.0f?(wo + wi).normalized() : m;
 	float deno = radicand < 0.0f ? 1:(no * (wi.dot(m))) + (ni * (woDOTm));
-
 	Pt = radicand < 0.0f? //total internal reflection
 			D(normal, m, alpha) * fabsf(m.dot(normal)) / 
 				(4.0f * fabsf(wi.dot(m))):
@@ -308,7 +319,6 @@ float Tracer::G1(Vector3f & v, Vector3f & m, Vector3f & normal, float& alpha) {
 };//Tracer Class
 
 Scene::Scene() { }
-void Scene::Finit(){}
 void Scene::triangleMesh(MeshData* mesh)
 {
 	for (TriData& tri : mesh->triangles) {
@@ -456,7 +466,7 @@ Color Scene::ReturnColor(Intersection i, int option) {
 	return Color(1.0f, 1.0f, 0.0f);
 }
 
-void Scene::TraceImage(Color* image, const int pass)
+void Scene::TraceImage(Color* image, const int pass )
 {
 	 Vector3f const X =         camera_->rx_ * camera_->orientation_._transformVector(Vector3f::UnitX());
 	 Vector3f const Y =         camera_->ry_ * camera_->orientation_._transformVector(Vector3f::UnitY());
@@ -494,7 +504,7 @@ void Scene::TraceImage(Color* image, const int pass)
 				 }
 				 else {
 					 Tracer tracer;
-					 image[y * width + x] += tracer.TraceRay(r, lights,  Tree);
+					 image[y * width + x] += tracer.TraceRay(r, Tree, this);
 				 }
 			 }
 		 }
@@ -504,5 +514,11 @@ void Scene::TraceImage(Color* image, const int pass)
 	 printf("  at : %i ms\n",  (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
 }
 
-//PDF probability density function
-//PDFBRDF
+
+//https://computergraphics.stackexchange.com/questions/4979/what-is-importance-sampling
+//https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf
+//http://wiki.analytica.com/Monte_Carlo_and_probabilistic_simulation
+//https://learnopengl.com/PBR/Theory
+//https://en.wikipedia.org/wiki/Specular_highlight
+//https://en.wikipedia.org/wiki/Specular_highlight#cite_note-CookTorrance-5
+//http://inst.eecs.berkeley.edu/~cs283/sp13/lectures/cookpap

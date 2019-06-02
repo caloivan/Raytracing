@@ -107,8 +107,6 @@ int main(int argc, char** argv)
     // Read the scene, calling scene.Command for each line.
     ReadScene(inName, scene);
 
-    scene->Finit();
-
     // Allocate and clear an image array
     Color *image =  new Color[scene->width*scene->height];
     for (int y=0;  y<scene->height;  y++)
